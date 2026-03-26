@@ -32,6 +32,26 @@ export interface ElectronAPI {
   onDataRefresh: (callback: (data: RefreshData) => void) => () => void;
 }
 
+// Auto-resize window to fit content
+function setupAutoResize() {
+  const observer = new ResizeObserver(() => {
+    const root = document.getElementById('root');
+    if (root) {
+      const height = root.scrollHeight;
+      ipcRenderer.send('app:resize', height);
+    }
+  });
+
+  window.addEventListener('DOMContentLoaded', () => {
+    const root = document.getElementById('root');
+    if (root) {
+      observer.observe(root);
+    }
+  });
+}
+
+setupAutoResize();
+
 const electronAPI: ElectronAPI = {
   getClaudeMaxUsage: () => ipcRenderer.invoke('claude-max:get-usage'),
   isClaudeAuthenticated: () => ipcRenderer.invoke('claude-max:is-authenticated'),

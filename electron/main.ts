@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, nativeImage, Menu, screen, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, nativeImage, Menu, screen, dialog, Notification } from 'electron';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
@@ -56,6 +56,37 @@ let refreshInterval: NodeJS.Timeout | null = null;
 
 const isDev = !app.isPackaged;
 
+// Track notified thresholds to avoid duplicate notifications
+const notifiedThresholds: Record<string, number> = {};
+const NOTIFICATION_THRESHOLDS = [80, 90];
+
+function checkAndNotify(bars: Array<{ percentage: number; label?: string }>) {
+  for (const bar of bars) {
+    const label = bar.label || 'Usage';
+    for (const threshold of NOTIFICATION_THRESHOLDS) {
+      const key = `${label}-${threshold}`;
+      if (bar.percentage >= threshold && !notifiedThresholds[key]) {
+        notifiedThresholds[key] = Date.now();
+        if (Notification.isSupported()) {
+          const notification = new Notification({
+            title: 'Claude Usage Alert',
+            body: `${label}: ${bar.percentage}% used (${threshold}% threshold reached)`,
+            silent: false,
+          });
+          notification.show();
+        }
+      }
+    }
+    // Reset notifications when usage drops below threshold
+    for (const threshold of NOTIFICATION_THRESHOLDS) {
+      const key = `${label}-${threshold}`;
+      if (bar.percentage < threshold && notifiedThresholds[key]) {
+        delete notifiedThresholds[key];
+      }
+    }
+  }
+}
+
 // Activity log system - keep last 20 entries
 interface LogEntry {
   timestamp: string;
@@ -82,13 +113,15 @@ function getRecentLogs(count: number = 6): LogEntry[] {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 320,
+    width: 340,
     height: 480,
     show: false,
     frame: false,
     resizable: false,
     skipTaskbar: true,
     transparent: true,
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -109,6 +142,14 @@ function createWindow() {
 
   mainWindow.on('blur', () => {
     mainWindow?.hide();
+  });
+
+  // Auto-resize window to fit content
+  ipcMain.on('app:resize', (_event, height: number) => {
+    if (!mainWindow) return;
+    const clampedHeight = Math.min(Math.max(height + 2, 100), 700);
+    const [width] = mainWindow.getSize();
+    mainWindow.setSize(width, clampedHeight);
   });
 }
 
@@ -255,7 +296,37 @@ function showWindow() {
   mainWindow.focus();
 }
 
-function updateTrayTitle(claudeUsage: { isAuthenticated: boolean; bars?: Array<{ percentage: number; label?: string }> } | null) {
+function formatResetTime(context?: string): string {
+  if (!context) return '';
+  // Extract time portion from strings like "Resets in 3 hr 20 min" or "3시간 20분 후 초기화"
+  const enMatch = context.match(/(\d+)\s*hr?\s*(\d+)?\s*min?/i);
+  if (enMatch) {
+    const hours = enMatch[1];
+    const minutes = enMatch[2];
+    return minutes ? `${hours}시간 ${minutes}분` : `${hours}시간`;
+  }
+  const krMatch = context.match(/(\d+)\s*시간\s*(\d+)?\s*분?/);
+  if (krMatch) {
+    const hours = krMatch[1];
+    const minutes = krMatch[2];
+    return minutes ? `${hours}시간 ${minutes}분` : `${hours}시간`;
+  }
+  const minOnly = context.match(/(\d+)\s*min/i) || context.match(/(\d+)\s*분/);
+  if (minOnly) {
+    return `${minOnly[1]}분`;
+  }
+  // Handle date-based resets like "Resets Mar 27, 10:00 AM" or "3월 27일 재설정"
+  const dateMatch = context.match(/Resets?\s+(.+)/i);
+  if (dateMatch) {
+    const dateStr = dateMatch[1].trim();
+    // Keep it short - just show the date part
+    if (dateStr.length <= 20) return dateStr;
+    return dateStr.substring(0, 20);
+  }
+  return '';
+}
+
+function updateTrayTitle(claudeUsage: { isAuthenticated: boolean; bars?: Array<{ percentage: number; label?: string; context?: string; used?: number; limit?: number }> } | null) {
   if (!tray) return;
   if (!claudeUsage || !claudeUsage.isAuthenticated) {
     tray.setTitle('');
@@ -267,7 +338,12 @@ function updateTrayTitle(claudeUsage: { isAuthenticated: boolean; bars?: Array<{
   ) || claudeUsage.bars?.[0];
 
   if (sessionBar !== undefined) {
-    tray.setTitle(` ${sessionBar.percentage}%`);
+    const resetTime = formatResetTime(sessionBar.context);
+    const parts = [`${sessionBar.percentage}%`];
+    if (resetTime) {
+      parts.push(resetTime);
+    }
+    tray.setTitle(` ${parts.join(' | ')}`);
   } else {
     tray.setTitle('');
   }
@@ -313,6 +389,11 @@ async function refreshAllData() {
     ]);
 
     updateTrayTitle(claudeUsage);
+
+    // Check usage thresholds and send notifications
+    if (claudeUsage?.isAuthenticated && claudeUsage.bars) {
+      checkAndNotify(claudeUsage.bars);
+    }
 
     mainWindow.webContents.send('app:data-updated', {
       claudeUsage,
