@@ -255,6 +255,24 @@ function showWindow() {
   mainWindow.focus();
 }
 
+function updateTrayTitle(claudeUsage: { isAuthenticated: boolean; bars?: Array<{ percentage: number; label?: string }> } | null) {
+  if (!tray) return;
+  if (!claudeUsage || !claudeUsage.isAuthenticated) {
+    tray.setTitle('');
+    return;
+  }
+  const sessionBar = claudeUsage.bars?.find(b =>
+    b.label?.toLowerCase().includes('current session') ||
+    b.label?.includes('현재 세션')
+  ) || claudeUsage.bars?.[0];
+
+  if (sessionBar !== undefined) {
+    tray.setTitle(` ${sessionBar.percentage}%`);
+  } else {
+    tray.setTitle('');
+  }
+}
+
 async function refreshAllData() {
   if (!mainWindow) return;
 
@@ -293,6 +311,8 @@ async function refreshAllData() {
         return null;
       }),
     ]);
+
+    updateTrayTitle(claudeUsage);
 
     mainWindow.webContents.send('app:data-updated', {
       claudeUsage,

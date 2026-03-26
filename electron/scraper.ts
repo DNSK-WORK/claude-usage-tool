@@ -138,8 +138,18 @@ export async function scrapeClaudeUsage(): Promise<ClaudeMaxUsage | null> {
         return;
       }
 
-      // Wait for JavaScript to render the usage data
-      await new Promise(r => setTimeout(r, 3000));
+      // Poll until usage content is rendered (up to 15 seconds)
+      let usageReady = false;
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        if (resolved || !scraperWindow || scraperWindow.isDestroyed()) return;
+        const hasUsageContent = await scraperWindow.webContents.executeJavaScript(
+          "document.body.innerText.includes('% used') || document.body.innerText.includes('사용됨')"
+        ).catch(() => false);
+        console.log('Waiting for usage content... attempt ' + (i + 1) + ', found: ' + hasUsageContent);
+        if (hasUsageContent) { usageReady = true; break; }
+      }
+      if (!usageReady) console.log('Usage content not found after polling, proceeding anyway');
 
       // Check again after waiting
       if (resolved || !scraperWindow || scraperWindow.isDestroyed()) return;
@@ -178,7 +188,7 @@ export async function scrapeClaudeUsage(): Promise<ClaudeMaxUsage | null> {
 
             const lines = text.split('\\n').map(l => l.trim()).filter(l => l);
 
-            // Define the section labels we're looking for
+            // Define the section labels we're looking for (English + Korean)
             const sectionLabels = [
               'Current session',
               'All models',
@@ -189,7 +199,15 @@ export async function scrapeClaudeUsage(): Promise<ClaudeMaxUsage | null> {
               'Daily limit',
               'Monthly limit',
               'Standard',
-              'Advanced'
+              'Advanced',
+              '현재 세션',
+              '모든 모델',
+              'Sonnet만',
+              '추가 사용량',
+              '주간 한도',
+              '주간 한도들',
+              '일일 한도',
+              '월간 한도'
             ];
 
             for (let i = 0; i < lines.length; i++) {
@@ -209,13 +227,13 @@ export async function scrapeClaudeUsage(): Promise<ClaudeMaxUsage | null> {
                 for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
                   const nextLine = lines[j];
 
-                  // Look for "Resets ..." pattern
-                  if (nextLine.toLowerCase().startsWith('reset')) {
+                  // Look for "Resets ..." or Korean reset patterns
+                  if (nextLine.toLowerCase().startsWith('reset') || nextLine.includes('재설정') || nextLine.includes('후 재설정')) {
                     resetInfo = nextLine;
                   }
 
-                  // Look for "X% used" pattern
-                  const pctMatch = nextLine.match(/(\\d+)%\\s*used/i);
+                  // Look for "X% used" or Korean "X% 사용됨" pattern
+                  const pctMatch = nextLine.match(/(\\d+)%\\s*(?:used|사용됨)/i);
                   if (pctMatch) {
                     percentage = parseInt(pctMatch[1], 10);
                     break; // Found the percentage, stop looking
@@ -240,9 +258,9 @@ export async function scrapeClaudeUsage(): Promise<ClaudeMaxUsage | null> {
 
             // Fallback: if no bars found, try to find percentages
             if (usage.bars.length === 0) {
-              const percentMatches = text.matchAll(/(\\d+)\\s*%\\s*used/gi);
+              const percentMatches = text.matchAll(/(\\d+)\\s*%\\s*(?:used|사용됨)/gi);
               let idx = 0;
-              const defaultLabels = ['Current Session', 'All models', 'Sonnet only', 'Extra usage'];
+              const defaultLabels = ['현재 세션', '모든 모델', 'Sonnet만', '추가 사용량'];
 
               for (const match of percentMatches) {
                 const pct = parseInt(match[1], 10);
@@ -250,11 +268,11 @@ export async function scrapeClaudeUsage(): Promise<ClaudeMaxUsage | null> {
                   const exists = usage.bars.some(b => Math.abs(b.percentage - pct) < 1);
                   if (!exists) {
                     const matchIndex = match.index || 0;
-                    const contextStart = Math.max(0, matchIndex - 100);
+                    const contextStart = Math.max(0, matchIndex - 200);
                     const contextEnd = Math.min(text.length, matchIndex + 100);
                     const context = text.substring(contextStart, contextEnd);
 
-                    const resetMatch = context.match(/Resets?[^\\n]*/i);
+                    const resetMatch = context.match(/(?:Resets?|재설정)[^\\n]*/i);
 
                     usage.bars.push({
                       value: pct,
