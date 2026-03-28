@@ -89,21 +89,37 @@ async function sendTelegramMessage(message: string): Promise<void> {
   }
 }
 
-function checkAndNotify(bars: Array<{ percentage: number; label?: string }>) {
+function checkAndNotify(bars: Array<{ percentage: number; label?: string; context?: string }>) {
+  // Telegram: only track "Current session" / "현재 세션"
+  const sessionBar = bars.find(b =>
+    b.label?.toLowerCase().includes('current session') ||
+    b.label?.includes('현재 세션')
+  );
+  if (sessionBar) {
+    const label = sessionBar.label || 'Current session';
+    const resetTime = formatResetTime(sessionBar.context);
+    const resetSuffix = resetTime ? `\n⏳ 남은 시간: ${resetTime}` : '';
+    const prevPct = previousPercentages[label];
+    if (prevPct === undefined) {
+      sendTelegramMessage(
+        `📊 <b>Claude Usage</b>\n${label}: ${sessionBar.percentage}%${resetSuffix}`
+      );
+      addLog(`Telegram: ${label} initial ${sessionBar.percentage}%`);
+    } else {
+      const prevBucket = Math.floor(prevPct / 10);
+      const currBucket = Math.floor(sessionBar.percentage / 10);
+      if (currBucket > prevBucket) {
+        sendTelegramMessage(
+          `⚠️ <b>Claude Usage Alert</b>\n${label}: ${prevPct}% → ${sessionBar.percentage}%${resetSuffix}`
+        );
+        addLog(`Telegram: ${label} ${prevPct}% → ${sessionBar.percentage}%`);
+      }
+    }
+    previousPercentages[label] = sessionBar.percentage;
+  }
+
   for (const bar of bars) {
     const label = bar.label || 'Usage';
-
-    // Telegram: notify when percentage crosses a 10% boundary
-    const prevPct = previousPercentages[label];
-    const prevBucket = prevPct !== undefined ? Math.floor(prevPct / 10) : Math.floor(bar.percentage / 10);
-    const currBucket = Math.floor(bar.percentage / 10);
-    if (prevPct !== undefined && currBucket > prevBucket) {
-      sendTelegramMessage(
-        `⚠️ <b>Claude Usage Alert</b>\n${label}: ${prevPct}% → ${bar.percentage}%`
-      );
-      addLog(`Telegram: ${label} ${prevPct}% → ${bar.percentage}%`);
-    }
-    previousPercentages[label] = bar.percentage;
 
     // macOS native notifications at thresholds
     for (const threshold of NOTIFICATION_THRESHOLDS) {
