@@ -60,9 +60,52 @@ const isDev = !app.isPackaged;
 const notifiedThresholds: Record<string, number> = {};
 const NOTIFICATION_THRESHOLDS = [80, 90];
 
+// Track previous percentages for Telegram notifications
+const previousPercentages: Record<string, number> = {};
+
+async function sendTelegramMessage(message: string): Promise<void> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+
+  if (!botToken || !chatId) return;
+
+  try {
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        parse_mode: 'HTML',
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('Telegram API error:', response.status, await response.text());
+    }
+  } catch (error) {
+    console.error('Failed to send Telegram message:', error);
+  }
+}
+
 function checkAndNotify(bars: Array<{ percentage: number; label?: string }>) {
   for (const bar of bars) {
     const label = bar.label || 'Usage';
+
+    // Telegram: notify when percentage crosses a 10% boundary
+    const prevPct = previousPercentages[label];
+    const prevBucket = prevPct !== undefined ? Math.floor(prevPct / 10) : Math.floor(bar.percentage / 10);
+    const currBucket = Math.floor(bar.percentage / 10);
+    if (prevPct !== undefined && currBucket > prevBucket) {
+      sendTelegramMessage(
+        `⚠️ <b>Claude Usage Alert</b>\n${label}: ${prevPct}% → ${bar.percentage}%`
+      );
+      addLog(`Telegram: ${label} ${prevPct}% → ${bar.percentage}%`);
+    }
+    previousPercentages[label] = bar.percentage;
+
+    // macOS native notifications at thresholds
     for (const threshold of NOTIFICATION_THRESHOLDS) {
       const key = `${label}-${threshold}`;
       if (bar.percentage >= threshold && !notifiedThresholds[key]) {
