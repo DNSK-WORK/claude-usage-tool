@@ -49,7 +49,6 @@ export async function isAuthenticated(): Promise<boolean> {
     c.name === 'lastActiveOrg' ||
     (c.name.includes('session') && c.value.length > 20)
   );
-  console.log('Auth check - cookies found:', cookies.map(c => c.name).join(', '));
   console.log('Auth check - has session:', hasSession);
   return hasSession;
 }
@@ -163,7 +162,6 @@ export async function scrapeClaudeUsage(): Promise<ClaudeMaxUsage | null> {
               bars: [],
               resetDate: null,
               isAuthenticated: true,
-              rawText: '',
               plan: null,
               email: null
             };
@@ -177,7 +175,6 @@ export async function scrapeClaudeUsage(): Promise<ClaudeMaxUsage | null> {
             }
 
             const text = document.body.innerText;
-            usage.rawText = text.substring(0, 2000);
 
             // Parse the structured usage sections from Claude's settings page
             // The page structure is:

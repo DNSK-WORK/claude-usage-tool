@@ -410,8 +410,6 @@ async function refreshAllData() {
 async function getApiData(): Promise<ApiData | null> {
   const adminKey = process.env.ANTHROPIC_ADMIN_KEY;
   console.log('getApiData called, key exists:', !!adminKey);
-  console.log('Key starts with sk-ant-admin:', adminKey?.startsWith('sk-ant-admin'));
-  console.log('Key prefix:', adminKey?.substring(0, 20));
 
   if (!adminKey) {
     console.log('Admin key not configured');
@@ -499,7 +497,6 @@ ipcMain.handle('app:get-admin-key-status', () => {
   const key = process.env.ANTHROPIC_ADMIN_KEY;
   return {
     configured: !!key && key.startsWith('sk-ant-admin'),
-    hint: key ? `${key.substring(0, 15)}...` : null,
   };
 });
 
