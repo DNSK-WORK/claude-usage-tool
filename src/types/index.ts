@@ -17,12 +17,6 @@ export interface ClaudeMaxUsage {
   email?: string;
 }
 
-export interface BillingInfo {
-  creditBalance: number | null;
-  currency: string;
-  lastUpdated: string;
-}
-
 export interface LogEntry {
   timestamp: string;
   message: string;
@@ -30,7 +24,6 @@ export interface LogEntry {
 
 export interface RefreshData {
   claudeUsage: ClaudeMaxUsage | null;
-  billingInfo: BillingInfo | null;
   timestamp: string;
   logs?: LogEntry[];
 }
@@ -42,7 +35,6 @@ declare global {
       getClaudeMaxUsage: () => Promise<ClaudeMaxUsage | null>;
       isClaudeAuthenticated: () => Promise<boolean>;
       openClaudeLogin: () => Promise<boolean>;
-      openPlatformLogin: () => Promise<boolean>;
       refreshAll: () => Promise<void>;
       onDataRefresh: (callback: (data: RefreshData) => void) => () => void;
     };

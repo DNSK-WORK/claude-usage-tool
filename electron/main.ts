@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Tray, nativeImage, Menu, screen, dialog, N
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
-import { scrapeClaudeUsage, scrapeBillingInfo, openLoginWindow, openPlatformLoginWindow, isAuthenticated } from './scraper';
+import { scrapeClaudeUsage, openLoginWindow, openPlatformLoginWindow, isAuthenticated } from './scraper';
 import { getUsageReport, getCostReport, getCreditBalance, ApiData } from './adminApi';
 
 // Disable default error dialogs in production
@@ -414,49 +414,30 @@ async function refreshAllData() {
   addLog('Refreshing data...');
 
   try {
-    const [claudeUsage, billingInfo] = await Promise.all([
-      scrapeClaudeUsage().then(result => {
-        if (result) {
-          if (result.isAuthenticated) {
-            addLog(`Usage: ${result.bars?.length || 0} bars fetched`);
-          } else {
-            addLog('Usage: Not authenticated');
-          }
+    const claudeUsage = await scrapeClaudeUsage().then(result => {
+      if (result) {
+        if (result.isAuthenticated) {
+          addLog(`Usage: ${result.bars?.length || 0} bars fetched`);
         } else {
-          addLog('Usage: Skipped (in progress)');
+          addLog('Usage: Not authenticated');
         }
-        return result;
-      }).catch(err => {
-        addLog(`Usage error: ${err.message}`);
-        return null;
-      }),
-      scrapeBillingInfo().then(result => {
-        if (result) {
-          if (result.creditBalance !== null) {
-            addLog(`Billing: $${result.creditBalance.toFixed(2)}`);
-          } else {
-            addLog('Billing: No balance data');
-          }
-        } else {
-          addLog('Billing: Skipped (in progress)');
-        }
-        return result;
-      }).catch(err => {
-        addLog(`Billing error: ${err.message}`);
-        return null;
-      }),
-    ]);
+      } else {
+        addLog('Usage: Skipped (in progress)');
+      }
+      return result;
+    }).catch(err => {
+      addLog(`Usage error: ${err.message}`);
+      return null;
+    });
 
     updateTrayTitle(claudeUsage);
 
-    // Check usage thresholds and send notifications
     if (claudeUsage?.isAuthenticated && claudeUsage.bars) {
       checkAndNotify(claudeUsage.bars);
     }
 
     mainWindow.webContents.send('app:data-updated', {
       claudeUsage,
-      billingInfo,
       timestamp: new Date().toISOString(),
       logs: getRecentLogs(6),
     });

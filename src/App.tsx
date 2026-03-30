@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ClaudeMaxUsage } from './components/ClaudeMaxUsage';
-import type { ClaudeMaxUsage as ClaudeMaxUsageType, BillingInfo, RefreshData, LogEntry } from './types';
+import type { ClaudeMaxUsage as ClaudeMaxUsageType, RefreshData, LogEntry } from './types';
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
 function App() {
   const [claudeUsage, setClaudeUsage] = useState<ClaudeMaxUsageType | null>(null);
-  const [billingInfo, setBillingInfo] = useState<BillingInfo | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -36,7 +35,6 @@ function App() {
 
     const unsubscribe = window.electronAPI.onDataRefresh((data: RefreshData) => {
       setClaudeUsage(data.claudeUsage);
-      setBillingInfo(data.billingInfo);
       setLastUpdated(new Date(data.timestamp));
       if (data.logs) {
         setLogs(data.logs);
@@ -52,14 +50,6 @@ function App() {
   const handleLogin = async () => {
     if (!isElectron) return;
     const success = await window.electronAPI.openClaudeLogin();
-    if (success) {
-      refreshData();
-    }
-  };
-
-  const handlePlatformLogin = async () => {
-    if (!isElectron) return;
-    const success = await window.electronAPI.openPlatformLogin();
     if (success) {
       refreshData();
     }
