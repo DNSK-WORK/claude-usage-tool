@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import type { AppSettings } from '../types';
 
 interface Props {
-  onClose: () => void;
+  onClose: (savedInterval?: number) => void;
 }
 
 export function Settings({ onClose }: Props) {
@@ -28,7 +28,7 @@ export function Settings({ onClose }: Props) {
     await window.electronAPI.setSetting('notificationThresholds', settings.notificationThresholds);
     await window.electronAPI.setSetting('refreshInterval', settings.refreshInterval);
     setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setTimeout(() => { setSaved(false); onClose(settings.refreshInterval); }, 2000);
   }
 
   const inputStyle: React.CSSProperties = {
@@ -51,7 +51,7 @@ export function Settings({ onClose }: Props) {
     <div className="section" style={{ padding: '12px 16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Settings</span>
-        <button className="btn-icon" onClick={onClose} style={{ fontSize: 13 }}>✕</button>
+        <button className="btn-icon" onClick={() => onClose()} style={{ fontSize: 13 }}>✕</button>
       </div>
 
       {/* Telegram */}

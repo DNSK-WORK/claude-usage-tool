@@ -19,6 +19,7 @@ function App() {
   const [history, setHistory] = useState<BarHistory[]>([]);
   const [burnRates, setBurnRates] = useState<BurnRateInfo[]>([]);
   const [apiCost, setApiCost] = useState<ApiCostSummary | null>(null);
+  const [refreshInterval, setRefreshInterval] = useState(60);
 
   const refreshData = useCallback(async () => {
     if (!isElectron) { setLoading(false); return; }
@@ -31,6 +32,7 @@ function App() {
   useEffect(() => {
     if (!isElectron) { setLoading(false); return; }
     refreshData();
+    window.electronAPI.getSettings().then(s => setRefreshInterval(s.refreshInterval));
     const unsubscribe = window.electronAPI.onDataRefresh((data: RefreshData) => {
       setClaudeUsage(data.claudeUsage);
       setLastUpdated(new Date(data.timestamp));
@@ -127,7 +129,7 @@ function App() {
 
       {/* Settings panel (replaces content) */}
       {showSettings ? (
-        <Settings onClose={() => setShowSettings(false)} />
+        <Settings onClose={(savedInterval) => { setShowSettings(false); if (savedInterval !== undefined) setRefreshInterval(savedInterval); }} />
       ) : (
         <>
           {/* Tabs — only show Cost tab if admin key configured */}
@@ -174,7 +176,7 @@ function App() {
             color: 'var(--text-muted)', borderTop: '1px solid var(--border)',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Auto-refresh 60s</span>
+              <span>Auto-refresh {refreshInterval}s</span>
               <button
                 className="btn-icon"
                 onClick={() => setShowLogs(!showLogs)}
