@@ -71,6 +71,9 @@ console.log('Admin key configured:', !!process.env.ANTHROPIC_ADMIN_KEY);
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let refreshInterval: NodeJS.Timeout | null = null;
+let refreshCount = 0;
+let cachedApiCost: Awaited<ReturnType<typeof fetchApiCost>> = null;
+const API_COST_REFRESH_EVERY = 5; // fetch cost every Nth usage refresh
 
 const isDev = !app.isPackaged;
 
@@ -210,7 +213,7 @@ function createWindow() {
     skipTaskbar: true,
     transparent: true,
     vibrancy: 'under-window',
-    visualEffectState: 'active',
+    visualEffectState: 'inactive',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -225,7 +228,10 @@ function createWindow() {
     mainWindow.loadFile(htmlPath);
   }
 
-  mainWindow.on('blur', () => mainWindow?.hide());
+  mainWindow.on('blur', () => {
+    mainWindow?.hide();
+    mainWindow?.setVibrancy(null as unknown as 'under-window');
+  });
 
   ipcMain.on('app:resize', (_event, height: number) => {
     if (!mainWindow) return;
@@ -312,8 +318,11 @@ function showWindow() {
   if (x < display.bounds.x) x = display.bounds.x;
 
   mainWindow.setPosition(x, y, false);
+  mainWindow.setVibrancy('under-window');
   mainWindow.show();
   mainWindow.focus();
+  // Push latest data immediately so user doesn't see stale state
+  refreshAllData();
 }
 
 function formatResetTime(context?: string): string {
@@ -390,17 +399,23 @@ async function fetchApiCost() {
 async function refreshAllData() {
   if (!mainWindow) return;
   addLog('Refreshing data...');
+  refreshCount++;
 
   try {
-    const [claudeUsage, apiCost] = await Promise.all([
+    const shouldRefreshCost = refreshCount === 1 || refreshCount % API_COST_REFRESH_EVERY === 0;
+
+    const [claudeUsage, freshApiCost] = await Promise.all([
       scrapeClaudeUsage().then(result => {
         if (result?.isAuthenticated) addLog(`Usage: ${result.bars?.length || 0} bars fetched`);
         else if (result) addLog('Usage: Not authenticated');
         else addLog('Usage: Skipped (in progress)');
         return result;
       }).catch(err => { addLog(`Usage error: ${err.message}`); return null; }),
-      fetchApiCost(),
+      shouldRefreshCost ? fetchApiCost() : Promise.resolve(cachedApiCost),
     ]);
+
+    if (shouldRefreshCost) cachedApiCost = freshApiCost;
+    const apiCost = freshApiCost ?? cachedApiCost;
 
     updateTrayTitle(claudeUsage);
 
@@ -420,14 +435,17 @@ async function refreshAllData() {
       }
     }
 
-    mainWindow.webContents.send('app:data-updated', {
-      claudeUsage,
-      timestamp: new Date().toISOString(),
-      logs: getRecentLogs(6),
-      history,
-      burnRates,
-      apiCost,
-    });
+    // Only push to renderer if window is visible — avoids waking the renderer process
+    if (mainWindow.isVisible()) {
+      mainWindow.webContents.send('app:data-updated', {
+        claudeUsage,
+        timestamp: new Date().toISOString(),
+        logs: getRecentLogs(6),
+        history,
+        burnRates,
+        apiCost,
+      });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     addLog(`Refresh failed: ${message}`);
