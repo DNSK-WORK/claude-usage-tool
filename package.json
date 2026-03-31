@@ -1,6 +1,6 @@
 {
   "name": "claude-usage-tool",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Menu bar app to track Claude Max subscription usage and API costs",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "electron:dev": "concurrently -k \"vite\" \"tsc -p tsconfig.electron.json -w\" \"wait-on tcp:5173 && electron .\"",
     "electron:build": "npm run build && tsc -p tsconfig.electron.json && electron-builder --mac",
+    "release": "npm run build && tsc -p tsconfig.electron.json && electron-builder --mac --publish always",
     "start": "electron .",
     "lint": "eslint . --ext ts,tsx"
   },
@@ -43,6 +44,11 @@
     ],
     "directories": {
       "output": "release"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "DNSK-WORK",
+      "repo": "claude-usage-tool"
     }
   }
 }
