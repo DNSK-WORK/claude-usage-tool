@@ -3,8 +3,9 @@ import * as path from 'path';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import Store from 'electron-store';
+import { autoUpdater } from 'electron-updater';
 import { scrapeClaudeUsage, openLoginWindow, openPlatformLoginWindow, isAuthenticated } from './scraper';
-import { getUsageReport, getCostReport, getCreditBalance, ApiData, calculateTotalCost, getCostByModel } from './adminApi';
+import { getCostReport, getCreditBalance, calculateTotalCost, getCostByModel } from './adminApi';
 
 // Disable default error dialogs in production
 if (app.isPackaged) {
@@ -83,15 +84,28 @@ const notifiedThresholds: Record<string, number> = {};
 // Track previous percentages for Telegram notifications
 const previousPercentages: Record<string, number> = {};
 
-// Usage history: circular buffer of last 10 readings per bar label
-const usageHistory: Map<string, Array<{ ts: number; pct: number }>> = new Map();
-const HISTORY_MAX = 10;
+// Usage history: circular buffer of last 100 readings per bar label, persisted across restarts
+const HISTORY_MAX = 100;
+type HistoryEntry = { ts: number; pct: number };
+
+function loadHistory(): Map<string, HistoryEntry[]> {
+  const saved = store.get('usageHistory') as Record<string, HistoryEntry[]> | undefined;
+  if (!saved) return new Map();
+  return new Map(Object.entries(saved));
+}
+
+function saveHistory(map: Map<string, HistoryEntry[]>) {
+  store.set('usageHistory', Object.fromEntries(map));
+}
+
+const usageHistory: Map<string, HistoryEntry[]> = loadHistory();
 
 function appendHistory(label: string, pct: number) {
   if (!usageHistory.has(label)) usageHistory.set(label, []);
   const arr = usageHistory.get(label)!;
   arr.push({ ts: Date.now(), pct });
   if (arr.length > HISTORY_MAX) arr.shift();
+  saveHistory(usageHistory);
 }
 
 function computeBurnRate(label: string, currentPct: number): { ratePerHour: number; etaMinutes: number | null } {
@@ -491,9 +505,21 @@ ipcMain.handle('settings:set', (_event, key: string, value: unknown) => {
 
 // App lifecycle
 app.whenReady().then(() => {
+  // Launch at login (production only)
+  if (app.isPackaged) {
+    app.setLoginItemSettings({ openAtLogin: true });
+  }
+
   createWindow();
   createTray();
   startAutoRefresh();
+
+  // Auto-updater (production only)
+  if (app.isPackaged) {
+    autoUpdater.checkForUpdatesAndNotify();
+    // Re-check every 4 hours
+    setInterval(() => autoUpdater.checkForUpdatesAndNotify(), 4 * 60 * 60 * 1000);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
