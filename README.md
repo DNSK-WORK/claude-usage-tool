@@ -2,9 +2,8 @@
 
 A lightweight macOS menu bar app that monitors your Claude Max/Pro subscription usage and API costs at a glance — without opening a browser.
 
-![macOS](https://img.shields.io/badge/platform-macOS-lightgrey)
-![Electron](https://img.shields.io/badge/electron-28-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+[![Latest Release](https://img.shields.io/github/v/release/DNSK-WORK/claude-usage-tool)](https://github.com/DNSK-WORK/claude-usage-tool/releases/latest)
+[![Release Date](https://img.shields.io/github/release-date/DNSK-WORK/claude-usage-tool)](https://github.com/DNSK-WORK/claude-usage-tool/releases/latest)
 
 ---
 
