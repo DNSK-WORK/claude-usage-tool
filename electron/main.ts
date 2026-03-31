@@ -266,7 +266,6 @@ function createTray() {
 
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Refresh', click: () => refreshAllData() },
-    { label: 'Login to Claude', click: () => openLoginWindow() },
     { type: 'separator' },
     {
       label: 'About',

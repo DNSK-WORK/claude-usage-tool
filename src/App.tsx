@@ -89,11 +89,6 @@ function App() {
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {lastUpdated && (
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              {lastUpdated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}
-            </span>
-          )}
           {/* Settings gear */}
           <button
             className="btn-icon"
