@@ -32,6 +32,16 @@ If you're a heavy Claude user you've probably:
 
 ## Quick Start
 
+**Homebrew (recommended):**
+```bash
+brew tap DNSK-WORK/tap
+brew install --cask claude-usage-tool
+```
+
+**Manual:**
+Download the `.dmg` from [Releases](https://github.com/DNSK-WORK/claude-usage-tool/releases/latest), open it, drag to Applications.
+
+**From source:**
 ```bash
 git clone https://github.com/DNSK-WORK/claude-usage-tool.git
 cd claude-usage-tool
