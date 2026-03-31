@@ -14,18 +14,23 @@ export function Settings({ onClose }: Props) {
   });
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [thresholdsRaw, setThresholdsRaw] = useState('80, 90');
 
   useEffect(() => {
     window.electronAPI.getSettings().then(s => {
       setSettings(s);
+      setThresholdsRaw(s.notificationThresholds.join(', '));
       setLoading(false);
     });
   }, []);
 
   async function handleSave() {
+    const parsedThresholds = thresholdsRaw.split(',')
+      .map(v => parseInt(v.trim()))
+      .filter(v => !isNaN(v) && v > 0 && v <= 100);
     await window.electronAPI.setSetting('telegramBotToken', settings.telegramBotToken);
     await window.electronAPI.setSetting('telegramChatId', settings.telegramChatId);
-    await window.electronAPI.setSetting('notificationThresholds', settings.notificationThresholds);
+    await window.electronAPI.setSetting('notificationThresholds', parsedThresholds);
     await window.electronAPI.setSetting('refreshInterval', settings.refreshInterval);
     setSaved(true);
     setTimeout(() => { setSaved(false); onClose(settings.refreshInterval); }, 2000);
@@ -86,13 +91,8 @@ export function Settings({ onClose }: Props) {
         <label style={labelStyle}>Alert Thresholds (%, comma-separated)</label>
         <input
           type="text"
-          value={settings.notificationThresholds.join(', ')}
-          onChange={e => {
-            const vals = e.target.value.split(',')
-              .map(v => parseInt(v.trim()))
-              .filter(v => !isNaN(v) && v > 0 && v <= 100);
-            setSettings(s => ({ ...s, notificationThresholds: vals }));
-          }}
+          value={thresholdsRaw}
+          onChange={e => setThresholdsRaw(e.target.value)}
           placeholder="80, 90"
           style={inputStyle}
         />
