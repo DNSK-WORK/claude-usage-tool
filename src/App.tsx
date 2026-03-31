@@ -10,7 +10,7 @@ type Tab = 'usage' | 'cost';
 
 function App() {
   const [claudeUsage, setClaudeUsage] = useState<ClaudeMaxUsageType | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [, setLastUpdated] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showLogs, setShowLogs] = useState(false);
