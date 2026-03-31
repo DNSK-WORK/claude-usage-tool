@@ -141,7 +141,7 @@ export async function scrapeClaudeUsage(): Promise<ClaudeMaxUsage | null> {
   };
 
   try {
-    // Step 1: 조직 목록에서 UUID 가져오기
+    // Step 1: Get UUID from organisation list
     const orgsRes = await ses.fetch(`${CLAUDE_BASE_URL}/api/organizations`);
     if (orgsRes.status === 401 || orgsRes.status === 403) {
       console.log('Not authenticated (status', orgsRes.status, ')');
@@ -153,7 +153,7 @@ export async function scrapeClaudeUsage(): Promise<ClaudeMaxUsage | null> {
       return notAuthenticated;
     }
 
-    // Step 2: 각 조직에서 사용량 조회 (데이터 있는 첫 번째 사용)
+    // Step 2: Fetch usage for each organisation (use first with data)
     for (const org of orgs) {
       const usageRes = await ses.fetch(`${CLAUDE_BASE_URL}/api/organizations/${org.uuid}/usage`);
       if (!usageRes.ok) continue;

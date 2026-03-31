@@ -17,10 +17,43 @@ export interface BillingInfo {
   lastUpdated: string;
 }
 
+export interface BarReading {
+  ts: number;
+  pct: number;
+}
+
+export interface BarHistory {
+  label: string;
+  readings: BarReading[];
+}
+
+export interface BurnRateInfo {
+  label: string;
+  ratePerHour: number;
+  etaMinutes: number | null;
+}
+
+export interface ApiCostSummary {
+  totalCost: number;
+  byModel: Record<string, number>;
+  creditBalance: string | null;
+  hasAdminKey: boolean;
+}
+
+export interface AppSettings {
+  telegramBotToken: string;
+  telegramChatId: string;
+  notificationThresholds: number[];
+  refreshInterval: number;
+}
+
 export interface RefreshData {
   claudeUsage: ClaudeMaxUsage | null;
   billingInfo: BillingInfo | null;
   timestamp: string;
+  history?: BarHistory[];
+  burnRates?: BurnRateInfo[];
+  apiCost?: ApiCostSummary | null;
 }
 
 export interface ElectronAPI {
@@ -30,6 +63,8 @@ export interface ElectronAPI {
   openPlatformLogin: () => Promise<boolean>;
   refreshAll: () => Promise<void>;
   onDataRefresh: (callback: (data: RefreshData) => void) => () => void;
+  getSettings: () => Promise<AppSettings>;
+  setSetting: (key: string, value: unknown) => Promise<void>;
 }
 
 // Auto-resize window to fit content
@@ -65,6 +100,8 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.removeListener('app:data-updated', listener);
     };
   },
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  setSetting: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

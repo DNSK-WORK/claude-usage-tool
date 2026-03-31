@@ -22,10 +22,43 @@ export interface LogEntry {
   message: string;
 }
 
+export interface BarReading {
+  ts: number;   // unix ms
+  pct: number;  // percentage 0-100
+}
+
+export interface BarHistory {
+  label: string;
+  readings: BarReading[];
+}
+
+export interface BurnRateInfo {
+  label: string;
+  ratePerHour: number;    // % per hour (positive = growing)
+  etaMinutes: number | null; // null if not growing or > 24hr
+}
+
+export interface ApiCostSummary {
+  totalCost: number;
+  byModel: Record<string, number>;
+  creditBalance: string | null;
+  hasAdminKey: boolean;
+}
+
+export interface AppSettings {
+  telegramBotToken: string;
+  telegramChatId: string;
+  notificationThresholds: number[];
+  refreshInterval: number; // seconds
+}
+
 export interface RefreshData {
   claudeUsage: ClaudeMaxUsage | null;
   timestamp: string;
   logs?: LogEntry[];
+  history?: BarHistory[];
+  burnRates?: BurnRateInfo[];
+  apiCost?: ApiCostSummary | null;
 }
 
 // Window type augmentation for Electron API
@@ -37,6 +70,8 @@ declare global {
       openClaudeLogin: () => Promise<boolean>;
       refreshAll: () => Promise<void>;
       onDataRefresh: (callback: (data: RefreshData) => void) => () => void;
+      getSettings: () => Promise<AppSettings>;
+      setSetting: (key: keyof AppSettings, value: AppSettings[keyof AppSettings]) => Promise<void>;
     };
   }
 }

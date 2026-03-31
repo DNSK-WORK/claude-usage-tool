@@ -2,8 +2,9 @@ import { app, BrowserWindow, ipcMain, Tray, nativeImage, Menu, screen, dialog, N
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
+import Store from 'electron-store';
 import { scrapeClaudeUsage, openLoginWindow, openPlatformLoginWindow, isAuthenticated } from './scraper';
-import { getUsageReport, getCostReport, getCreditBalance, ApiData } from './adminApi';
+import { getUsageReport, getCostReport, getCreditBalance, ApiData, calculateTotalCost, getCostByModel } from './adminApi';
 
 // Disable default error dialogs in production
 if (app.isPackaged) {
@@ -12,40 +13,57 @@ if (app.isPackaged) {
 
 // Handle uncaught exceptions to prevent crashes from EPIPE errors
 process.on('uncaughtException', (error) => {
-  // Ignore EPIPE errors which occur when writing to closed pipes
-  if (error.message?.includes('EPIPE')) {
-    return;
-  }
-  // In dev mode, log to console; in prod, silently ignore non-critical errors
-  if (!app.isPackaged) {
-    console.error('Uncaught exception:', error);
-  }
+  if (error.message?.includes('EPIPE')) return;
+  if (!app.isPackaged) console.error('Uncaught exception:', error);
 });
 
-// Handle unhandled promise rejections
 process.on('unhandledRejection', (reason) => {
   const message = reason instanceof Error ? reason.message : String(reason);
-  if (message?.includes('EPIPE')) {
-    return;
-  }
-  if (!app.isPackaged) {
-    console.error('Unhandled rejection:', reason);
-  }
+  if (message?.includes('EPIPE')) return;
+  if (!app.isPackaged) console.error('Unhandled rejection:', reason);
 });
 
-// Load environment variables - try multiple paths
+// Load environment variables
 const envPaths = [
   path.join(__dirname, '..', '.env.local'),
   path.join(app.getAppPath(), '.env.local'),
   path.join(process.cwd(), '.env.local'),
 ];
-
 for (const envPath of envPaths) {
   if (fs.existsSync(envPath)) {
-    console.log('Loading .env.local from:', envPath);
     dotenv.config({ path: envPath });
     break;
   }
+}
+
+// Settings store
+const store = new Store({
+  defaults: {
+    telegramBotToken: '',
+    telegramChatId: '',
+    notificationThresholds: [80, 90],
+    refreshInterval: 60,
+  },
+});
+
+function getSetting<T>(key: string, fallback: T): T {
+  return (store.get(key) as T) || fallback;
+}
+
+function getTelegramToken(): string {
+  return (store.get('telegramBotToken') as string) || process.env.TELEGRAM_BOT_TOKEN || '';
+}
+
+function getTelegramChatId(): string {
+  return (store.get('telegramChatId') as string) || process.env.TELEGRAM_CHAT_ID || '';
+}
+
+function getNotificationThresholds(): number[] {
+  return (store.get('notificationThresholds') as number[]) || [80, 90];
+}
+
+function getRefreshInterval(): number {
+  return ((store.get('refreshInterval') as number) || 60) * 1000;
 }
 
 console.log('Admin key configured:', !!process.env.ANTHROPIC_ADMIN_KEY);
@@ -58,15 +76,46 @@ const isDev = !app.isPackaged;
 
 // Track notified thresholds to avoid duplicate notifications
 const notifiedThresholds: Record<string, number> = {};
-const NOTIFICATION_THRESHOLDS = [80, 90];
 
 // Track previous percentages for Telegram notifications
 const previousPercentages: Record<string, number> = {};
 
-async function sendTelegramMessage(message: string): Promise<void> {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+// Usage history: circular buffer of last 10 readings per bar label
+const usageHistory: Map<string, Array<{ ts: number; pct: number }>> = new Map();
+const HISTORY_MAX = 10;
 
+function appendHistory(label: string, pct: number) {
+  if (!usageHistory.has(label)) usageHistory.set(label, []);
+  const arr = usageHistory.get(label)!;
+  arr.push({ ts: Date.now(), pct });
+  if (arr.length > HISTORY_MAX) arr.shift();
+}
+
+function computeBurnRate(label: string, currentPct: number): { ratePerHour: number; etaMinutes: number | null } {
+  const arr = usageHistory.get(label);
+  if (!arr || arr.length < 2) return { ratePerHour: 0, etaMinutes: null };
+
+  const oldest = arr[0];
+  const newest = arr[arr.length - 1];
+  const deltaMs = newest.ts - oldest.ts;
+  const deltaPct = newest.pct - oldest.pct;
+
+  if (deltaMs <= 0 || deltaPct <= 0) return { ratePerHour: 0, etaMinutes: null };
+
+  const ratePerHour = (deltaPct / deltaMs) * 3600000;
+  const ratePerMin = deltaPct / (deltaMs / 60000);
+  const remaining = 100 - currentPct;
+  const etaMinutes = remaining / ratePerMin;
+
+  // Hide if > 24 hours
+  if (etaMinutes > 1440) return { ratePerHour, etaMinutes: null };
+
+  return { ratePerHour, etaMinutes };
+}
+
+async function sendTelegramMessage(message: string): Promise<void> {
+  const botToken = getTelegramToken();
+  const chatId = getTelegramChatId();
   if (!botToken || !chatId) return;
 
   try {
@@ -74,13 +123,8 @@ async function sendTelegramMessage(message: string): Promise<void> {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: message,
-        parse_mode: 'HTML',
-      }),
+      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' }),
     });
-
     if (!response.ok) {
       console.error('Telegram API error:', response.status, await response.text());
     }
@@ -90,28 +134,23 @@ async function sendTelegramMessage(message: string): Promise<void> {
 }
 
 function checkAndNotify(bars: Array<{ percentage: number; label?: string; context?: string }>) {
-  // Telegram: only track "Current session" / "현재 세션"
-  const sessionBar = bars.find(b =>
-    b.label?.toLowerCase().includes('current session') ||
-    b.label?.includes('현재 세션')
-  );
+  const THRESHOLDS = getNotificationThresholds();
+
+  // Telegram: only track "Current session"
+  const sessionBar = bars.find(b => b.label?.toLowerCase().includes('current session'));
   if (sessionBar) {
     const label = sessionBar.label || 'Current session';
     const resetTime = formatResetTime(sessionBar.context);
-    const resetSuffix = resetTime ? `\n⏳ 남은 시간: ${resetTime}` : '';
+    const resetSuffix = resetTime ? `\n⏳ Time remaining: ${resetTime}` : '';
     const prevPct = previousPercentages[label];
     if (prevPct === undefined) {
-      sendTelegramMessage(
-        `📊 <b>Claude Usage</b>\n${label}: ${sessionBar.percentage}%${resetSuffix}`
-      );
+      sendTelegramMessage(`📊 <b>Claude Usage</b>\n${label}: ${sessionBar.percentage}%${resetSuffix}`);
       addLog(`Telegram: ${label} initial ${sessionBar.percentage}%`);
     } else {
       const prevBucket = Math.floor(prevPct / 10);
       const currBucket = Math.floor(sessionBar.percentage / 10);
       if (currBucket > prevBucket) {
-        sendTelegramMessage(
-          `⚠️ <b>Claude Usage Alert</b>\n${label}: ${prevPct}% → ${sessionBar.percentage}%${resetSuffix}`
-        );
+        sendTelegramMessage(`⚠️ <b>Claude Usage Alert</b>\n${label}: ${prevPct}% → ${sessionBar.percentage}%${resetSuffix}`);
         addLog(`Telegram: ${label} ${prevPct}% → ${sessionBar.percentage}%`);
       }
     }
@@ -120,24 +159,20 @@ function checkAndNotify(bars: Array<{ percentage: number; label?: string; contex
 
   for (const bar of bars) {
     const label = bar.label || 'Usage';
-
-    // macOS native notifications at thresholds
-    for (const threshold of NOTIFICATION_THRESHOLDS) {
+    for (const threshold of THRESHOLDS) {
       const key = `${label}-${threshold}`;
       if (bar.percentage >= threshold && !notifiedThresholds[key]) {
         notifiedThresholds[key] = Date.now();
         if (Notification.isSupported()) {
-          const notification = new Notification({
+          new Notification({
             title: 'Claude Usage Alert',
             body: `${label}: ${bar.percentage}% used (${threshold}% threshold reached)`,
             silent: false,
-          });
-          notification.show();
+          }).show();
         }
       }
     }
-    // Reset notifications when usage drops below threshold
-    for (const threshold of NOTIFICATION_THRESHOLDS) {
+    for (const threshold of THRESHOLDS) {
       const key = `${label}-${threshold}`;
       if (bar.percentage < threshold && notifiedThresholds[key]) {
         delete notifiedThresholds[key];
@@ -146,7 +181,7 @@ function checkAndNotify(bars: Array<{ percentage: number; label?: string; contex
   }
 }
 
-// Activity log system - keep last 20 entries
+// Activity log system
 interface LogEntry {
   timestamp: string;
   message: string;
@@ -155,18 +190,13 @@ const activityLogs: LogEntry[] = [];
 const MAX_LOGS = 20;
 
 function addLog(message: string) {
-  const entry: LogEntry = {
-    timestamp: new Date().toISOString(),
-    message
-  };
+  const entry: LogEntry = { timestamp: new Date().toISOString(), message };
   activityLogs.push(entry);
-  if (activityLogs.length > MAX_LOGS) {
-    activityLogs.shift();
-  }
+  if (activityLogs.length > MAX_LOGS) activityLogs.shift();
   console.log(`[${entry.timestamp}] ${message}`);
 }
 
-function getRecentLogs(count: number = 6): LogEntry[] {
+function getRecentLogs(count = 6): LogEntry[] {
   return activityLogs.slice(-count);
 }
 
@@ -190,20 +220,13 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
-    // mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    // In production, __dirname is inside app.asar/dist-electron
-    // So we need to go up one level to get to dist/index.html
     const htmlPath = path.join(__dirname, '..', 'dist', 'index.html');
-    console.log('Loading HTML from:', htmlPath);
     mainWindow.loadFile(htmlPath);
   }
 
-  mainWindow.on('blur', () => {
-    mainWindow?.hide();
-  });
+  mainWindow.on('blur', () => mainWindow?.hide());
 
-  // Auto-resize window to fit content
   ipcMain.on('app:resize', (_event, height: number) => {
     if (!mainWindow) return;
     const clampedHeight = Math.min(Math.max(height + 2, 100), 700);
@@ -213,30 +236,21 @@ function createWindow() {
 }
 
 function createTray() {
-  // Create a simple icon - in production, use a proper icon file
   const iconPath = path.join(__dirname, '..', 'assets', 'trayIconTemplate.png');
   let icon: Electron.NativeImage;
-
   try {
     icon = nativeImage.createFromPath(iconPath);
-    if (icon.isEmpty()) {
-      // Fallback: create a simple 16x16 icon
-      icon = nativeImage.createEmpty();
-    }
+    if (icon.isEmpty()) icon = nativeImage.createEmpty();
   } catch {
     icon = nativeImage.createEmpty();
   }
 
-  // If icon is empty, create a basic one programmatically
   if (icon.isEmpty()) {
-    // Create a 16x16 basic icon
     const size = 16;
     const canvas = Buffer.alloc(size * size * 4);
     for (let i = 0; i < size * size; i++) {
-      canvas[i * 4] = 100;     // R
-      canvas[i * 4 + 1] = 100; // G
-      canvas[i * 4 + 2] = 100; // B
-      canvas[i * 4 + 3] = 255; // A
+      canvas[i * 4] = 100; canvas[i * 4 + 1] = 100;
+      canvas[i * 4 + 2] = 100; canvas[i * 4 + 3] = 255;
     }
     icon = nativeImage.createFromBuffer(canvas, { width: size, height: size });
   }
@@ -252,103 +266,50 @@ function createTray() {
       label: 'About',
       click: () => {
         const aboutWindow = new BrowserWindow({
-          width: 300,
-          height: 200,
-          resizable: false,
-          minimizable: false,
-          maximizable: false,
+          width: 300, height: 200,
+          resizable: false, minimizable: false, maximizable: false,
           title: 'About Claude Usage Tool',
-          webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-          },
+          webPreferences: { nodeIntegration: false, contextIsolation: true },
         });
-
         const iconPath = path.join(__dirname, '..', 'assets', 'icon.png');
         const iconBase64 = fs.existsSync(iconPath)
           ? 'data:image/png;base64,' + fs.readFileSync(iconPath).toString('base64')
           : '';
-
-        const html = `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <style>
-              body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                height: 100vh;
-                margin: 0;
-                background: #1a1a1a;
-                color: #fff;
-                text-align: center;
-                -webkit-user-select: none;
-              }
-              img { width: 64px; height: 64px; margin-bottom: 12px; }
-              h1 { font-size: 16px; margin: 0 0 4px 0; font-weight: 600; }
-              .version { font-size: 12px; color: #888; margin-bottom: 8px; }
-              .author { font-size: 12px; color: #aaa; }
-              a { color: #d97706; text-decoration: none; }
-              a:hover { text-decoration: underline; }
-            </style>
-          </head>
-          <body>
-            <img src="${iconBase64}" alt="icon" />
+        aboutWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`
+          <!DOCTYPE html><html><head><style>
+            body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a;color:#fff;text-align:center;-webkit-user-select:none}
+            img{width:64px;height:64px;margin-bottom:12px}h1{font-size:16px;margin:0 0 4px 0;font-weight:600}
+            .version{font-size:12px;color:#888;margin-bottom:8px}.author{font-size:12px;color:#aaa}
+            a{color:#d97706;text-decoration:none}a:hover{text-decoration:underline}
+          </style></head><body>
+            <img src="${iconBase64}" alt="icon"/>
             <h1>Claude Usage Tool</h1>
-            <div class="version">ver 0.10</div>
+            <div class="version">ver 0.11</div>
             <div class="author">by <a href="mailto:kingi@kingigilbert.com">Kingi Gilbert</a></div>
-          </body>
-          </html>
-        `;
-
-        aboutWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+          </body></html>
+        `));
         aboutWindow.setMenu(null);
       }
     },
     { label: 'Quit', click: () => app.quit() },
   ]);
 
-  tray.on('click', () => {
-    if (mainWindow?.isVisible()) {
-      mainWindow.hide();
-    } else {
-      showWindow();
-    }
-  });
-
-  tray.on('right-click', () => {
-    tray?.popUpContextMenu(contextMenu);
-  });
+  tray.on('click', () => mainWindow?.isVisible() ? mainWindow.hide() : showWindow());
+  tray.on('right-click', () => tray?.popUpContextMenu(contextMenu));
 }
 
 function showWindow() {
-  if (!mainWindow || !tray) {
-    console.log('showWindow: mainWindow or tray is null');
-    return;
-  }
-
+  if (!mainWindow || !tray) return;
   const trayBounds = tray.getBounds();
   const windowBounds = mainWindow.getBounds();
   const display = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
 
-  console.log('Tray bounds:', trayBounds);
-  console.log('Window bounds:', windowBounds);
-  console.log('Display bounds:', display.bounds);
-
-  // Position window below tray icon (macOS style)
   let x = Math.round(trayBounds.x + trayBounds.width / 2 - windowBounds.width / 2);
   let y = Math.round(trayBounds.y + trayBounds.height + 4);
 
-  // Ensure window is within display bounds
-  if (x + windowBounds.width > display.bounds.x + display.bounds.width) {
+  if (x + windowBounds.width > display.bounds.x + display.bounds.width)
     x = display.bounds.x + display.bounds.width - windowBounds.width;
-  }
-  if (x < display.bounds.x) {
-    x = display.bounds.x;
-  }
+  if (x < display.bounds.x) x = display.bounds.x;
 
   mainWindow.setPosition(x, y, false);
   mainWindow.show();
@@ -357,89 +318,115 @@ function showWindow() {
 
 function formatResetTime(context?: string): string {
   if (!context) return '';
-  // Extract time portion from strings like "Resets in 3 hr 20 min" or "3시간 20분 후 초기화"
   const enMatch = context.match(/(\d+)\s*hr?\s*(\d+)?\s*min?/i);
   if (enMatch) {
     const hours = enMatch[1];
     const minutes = enMatch[2];
-    return minutes ? `${hours}시간 ${minutes}분` : `${hours}시간`;
+    return minutes ? `${hours}hr ${minutes}min` : `${hours}hr`;
   }
   const krMatch = context.match(/(\d+)\s*시간\s*(\d+)?\s*분?/);
   if (krMatch) {
     const hours = krMatch[1];
     const minutes = krMatch[2];
-    return minutes ? `${hours}시간 ${minutes}분` : `${hours}시간`;
+    return minutes ? `${hours}hr ${minutes}min` : `${hours}hr`;
   }
   const minOnly = context.match(/(\d+)\s*min/i) || context.match(/(\d+)\s*분/);
-  if (minOnly) {
-    return `${minOnly[1]}분`;
-  }
-  // Handle date-based resets like "Resets Mar 27, 10:00 AM" or "3월 27일 재설정"
+  if (minOnly) return `${minOnly[1]}min`;
   const dateMatch = context.match(/Resets?\s+(.+)/i);
   if (dateMatch) {
     const dateStr = dateMatch[1].trim();
-    // Keep it short - just show the date part
-    if (dateStr.length <= 20) return dateStr;
-    return dateStr.substring(0, 20);
+    return dateStr.length <= 20 ? dateStr : dateStr.substring(0, 20);
   }
   return '';
 }
 
-function updateTrayTitle(claudeUsage: { isAuthenticated: boolean; bars?: Array<{ percentage: number; label?: string; context?: string; used?: number; limit?: number }> } | null) {
+function updateTrayTitle(claudeUsage: { isAuthenticated: boolean; bars?: Array<{ percentage: number; label?: string; context?: string }> } | null) {
   if (!tray) return;
-  if (!claudeUsage || !claudeUsage.isAuthenticated) {
-    tray.setTitle('');
-    return;
-  }
-  const sessionBar = claudeUsage.bars?.find(b =>
-    b.label?.toLowerCase().includes('current session') ||
-    b.label?.includes('현재 세션')
-  ) || claudeUsage.bars?.[0];
+  if (!claudeUsage?.isAuthenticated) { tray.setTitle(''); return; }
+
+  const sessionBar = claudeUsage.bars?.find(b => b.label?.toLowerCase().includes('current session'))
+    || claudeUsage.bars?.[0];
 
   if (sessionBar !== undefined) {
     const resetTime = formatResetTime(sessionBar.context);
     const parts = [`${sessionBar.percentage}%`];
-    if (resetTime) {
-      parts.push(resetTime);
-    }
+    if (resetTime) parts.push(resetTime);
     tray.setTitle(` ${parts.join(' | ')}`);
   } else {
     tray.setTitle('');
   }
 }
 
+async function fetchApiCost() {
+  const adminKey = process.env.ANTHROPIC_ADMIN_KEY;
+  if (!adminKey?.startsWith('sk-ant-admin')) return null;
+
+  try {
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const startDate = thirtyDaysAgo.toISOString().split('T')[0] + 'T00:00:00Z';
+    const endDateStr = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0] + 'T00:00:00Z';
+
+    const [costReport, creditBalance] = await Promise.all([
+      getCostReport(adminKey, { starting_at: startDate, ending_at: endDateStr, group_by: ['workspace_id'], limit: 31 }),
+      getCreditBalance(adminKey).catch(() => null),
+    ]);
+
+    const totalCost = calculateTotalCost(costReport);
+    const byModel = getCostByModel(costReport);
+
+    return {
+      totalCost,
+      byModel,
+      creditBalance: creditBalance?.available_credit ?? null,
+      hasAdminKey: true,
+    };
+  } catch (err) {
+    addLog(`API cost fetch error: ${err instanceof Error ? err.message : String(err)}`);
+    return { totalCost: 0, byModel: {}, creditBalance: null, hasAdminKey: true };
+  }
+}
+
 async function refreshAllData() {
   if (!mainWindow) return;
-
   addLog('Refreshing data...');
 
   try {
-    const claudeUsage = await scrapeClaudeUsage().then(result => {
-      if (result) {
-        if (result.isAuthenticated) {
-          addLog(`Usage: ${result.bars?.length || 0} bars fetched`);
-        } else {
-          addLog('Usage: Not authenticated');
-        }
-      } else {
-        addLog('Usage: Skipped (in progress)');
-      }
-      return result;
-    }).catch(err => {
-      addLog(`Usage error: ${err.message}`);
-      return null;
-    });
+    const [claudeUsage, apiCost] = await Promise.all([
+      scrapeClaudeUsage().then(result => {
+        if (result?.isAuthenticated) addLog(`Usage: ${result.bars?.length || 0} bars fetched`);
+        else if (result) addLog('Usage: Not authenticated');
+        else addLog('Usage: Skipped (in progress)');
+        return result;
+      }).catch(err => { addLog(`Usage error: ${err.message}`); return null; }),
+      fetchApiCost(),
+    ]);
 
     updateTrayTitle(claudeUsage);
 
+    // Update history + compute burn rates
+    const history: Array<{ label: string; readings: Array<{ ts: number; pct: number }> }> = [];
+    const burnRates: Array<{ label: string; ratePerHour: number; etaMinutes: number | null }> = [];
+
     if (claudeUsage?.isAuthenticated && claudeUsage.bars) {
       checkAndNotify(claudeUsage.bars);
+
+      for (const bar of claudeUsage.bars) {
+        const label = bar.label || 'Usage';
+        appendHistory(label, bar.percentage);
+        const burn = computeBurnRate(label, bar.percentage);
+        burnRates.push({ label, ...burn });
+        history.push({ label, readings: [...(usageHistory.get(label) || [])] });
+      }
     }
 
     mainWindow.webContents.send('app:data-updated', {
       claudeUsage,
       timestamp: new Date().toISOString(),
       logs: getRecentLogs(6),
+      history,
+      burnRates,
+      apiCost,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -447,97 +434,42 @@ async function refreshAllData() {
   }
 }
 
-async function getApiData(): Promise<ApiData | null> {
-  const adminKey = process.env.ANTHROPIC_ADMIN_KEY;
-  console.log('getApiData called, key exists:', !!adminKey);
-
-  if (!adminKey) {
-    console.log('Admin key not configured');
-    return null;
-  }
-
-  // Accept both sk-ant-admin- and sk-ant-admin01- prefixes
-  if (!adminKey.startsWith('sk-ant-admin')) {
-    console.log('Invalid admin key format');
-    return null;
-  }
-
-  const now = new Date();
-  // Use a date from 30 days ago to now - using simple date strings
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const startDate = thirtyDaysAgo.toISOString().split('T')[0] + 'T00:00:00Z';
-  const endDateStr = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0] + 'T00:00:00Z';
-
-  try {
-    console.log('Fetching API data from:', startDate, 'to:', endDateStr);
-
-    const [usageReport, costReport, creditBalance] = await Promise.all([
-      getUsageReport(adminKey, {
-        starting_at: startDate,
-        group_by: ['workspace_id', 'model'],
-        limit: 31,
-      }),
-      getCostReport(adminKey, {
-        starting_at: startDate,
-        group_by: ['workspace_id'],
-        limit: 31,
-      }),
-      getCreditBalance(adminKey).catch(err => {
-        console.log('Credit balance not available:', err.message);
-        return null;
-      }),
-    ]);
-
-    console.log('API data fetched successfully');
-    console.log('Usage buckets:', usageReport?.data?.length || 0);
-    console.log('Cost buckets:', costReport?.data?.length || 0);
-    console.log('Credit balance:', creditBalance?.available_credit || 'N/A');
-
-    return { usageReport, costReport, creditBalance };
-  } catch (error) {
-    console.error('Error fetching API data:', error);
-    throw error;
-  }
-}
-
 function startAutoRefresh() {
-  // Refresh every 60 seconds
-  refreshInterval = setInterval(refreshAllData, 60000);
-  // Initial refresh
   refreshAllData();
+  const interval = getRefreshInterval();
+  refreshInterval = setInterval(refreshAllData, interval);
 }
 
 // IPC Handlers
 ipcMain.handle('claude-max:get-usage', async () => {
-  try {
-    return await scrapeClaudeUsage();
-  } catch (error) {
-    console.error('Failed to get Claude usage:', error);
-    return null;
+  try { return await scrapeClaudeUsage(); }
+  catch (error) { console.error('Failed to get Claude usage:', error); return null; }
+});
+
+ipcMain.handle('claude-max:is-authenticated', async () => isAuthenticated());
+ipcMain.handle('claude-max:login', async () => openLoginWindow());
+ipcMain.handle('platform:login', async () => openPlatformLoginWindow());
+ipcMain.handle('app:refresh-all', async () => refreshAllData());
+
+ipcMain.handle('app:get-admin-key-status', () => ({
+  configured: !!process.env.ANTHROPIC_ADMIN_KEY?.startsWith('sk-ant-admin'),
+}));
+
+ipcMain.handle('settings:get', () => ({
+  telegramBotToken: getTelegramToken(),
+  telegramChatId: getTelegramChatId(),
+  notificationThresholds: getNotificationThresholds(),
+  refreshInterval: getSetting<number>('refreshInterval', 60),
+}));
+
+ipcMain.handle('settings:set', (_event, key: string, value: unknown) => {
+  store.set(key, value);
+
+  // Restart refresh interval if it changed
+  if (key === 'refreshInterval' && refreshInterval) {
+    clearInterval(refreshInterval);
+    refreshInterval = setInterval(refreshAllData, getRefreshInterval());
   }
-});
-
-ipcMain.handle('claude-max:is-authenticated', async () => {
-  return isAuthenticated();
-});
-
-ipcMain.handle('claude-max:login', async () => {
-  return openLoginWindow();
-});
-
-ipcMain.handle('platform:login', async () => {
-  return openPlatformLoginWindow();
-});
-
-ipcMain.handle('app:refresh-all', async () => {
-  await refreshAllData();
-});
-
-ipcMain.handle('app:get-admin-key-status', () => {
-  const key = process.env.ANTHROPIC_ADMIN_KEY;
-  return {
-    configured: !!key && key.startsWith('sk-ant-admin'),
-  };
 });
 
 // App lifecycle
@@ -547,25 +479,16 @@ app.whenReady().then(() => {
   startAutoRefresh();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
-  if (refreshInterval) {
-    clearInterval(refreshInterval);
-  }
+  if (refreshInterval) clearInterval(refreshInterval);
 });
 
-// Hide dock icon on macOS (menu bar app)
-if (process.platform === 'darwin') {
-  app.dock?.hide();
-}
+if (process.platform === 'darwin') app.dock?.hide();

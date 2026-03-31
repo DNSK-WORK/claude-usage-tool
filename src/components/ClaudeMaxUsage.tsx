@@ -1,9 +1,11 @@
-import type { ClaudeMaxUsage as ClaudeMaxUsageType, UsageBar as UsageBarType } from '../types';
+import type { ClaudeMaxUsage as ClaudeMaxUsageType, UsageBar as UsageBarType, BarHistory, BurnRateInfo } from '../types';
 
 interface Props {
   usage: ClaudeMaxUsageType | null;
   onLogin: () => void;
   loading: boolean;
+  history?: BarHistory[];
+  burnRates?: BurnRateInfo[];
 }
 
 function getBarColor(percentage: number): string {
@@ -19,44 +21,88 @@ function getPercentColor(percentage: number): string {
   return 'var(--text-primary)';
 }
 
+function Sparkline({ readings, color }: { readings: Array<{ ts: number; pct: number }>; color: string }) {
+  if (readings.length < 3) return null;
+
+  const W = 60, H = 18;
+  const minPct = Math.min(...readings.map(r => r.pct));
+  const maxPct = Math.max(...readings.map(r => r.pct));
+  const range = maxPct - minPct || 1;
+
+  const points = readings.map((r, i) => {
+    const x = (i / (readings.length - 1)) * W;
+    const y = H - ((r.pct - minPct) / range) * (H - 2) - 1;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+
+  return (
+    <svg width={W} height={H} style={{ display: 'block', overflow: 'visible' }}>
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        opacity={0.7}
+      />
+      {/* Last point dot */}
+      {(() => {
+        const last = readings[readings.length - 1];
+        const x = W;
+        const y = H - ((last.pct - minPct) / range) * (H - 2) - 1;
+        return <circle cx={x.toFixed(1)} cy={y.toFixed(1)} r="2" fill={color} opacity={0.9} />;
+      })()}
+    </svg>
+  );
+}
+
+function formatEta(etaMinutes: number): string {
+  if (etaMinutes < 1) return '<1min to limit';
+  if (etaMinutes < 60) return `~${Math.round(etaMinutes)}min to limit`;
+  const h = Math.floor(etaMinutes / 60);
+  const m = Math.round(etaMinutes % 60);
+  return m > 0 ? `~${h}hr ${m}min to limit` : `~${h}hr to limit`;
+}
+
 function UsageBarComponent({
   bar,
   label,
-  resetInfo
+  resetInfo,
+  readings,
+  burnRate,
 }: {
   bar: UsageBarType;
   label: string;
   resetInfo?: string;
+  readings?: Array<{ ts: number; pct: number }>;
+  burnRate?: BurnRateInfo;
 }) {
   const displayLabel = bar.label || label;
   const percentage = Math.round(bar.percentage);
   const barColor = getBarColor(percentage);
   const isCritical = percentage >= 90;
+  const showBurnRate = burnRate && burnRate.etaMinutes !== null && burnRate.ratePerHour > 0;
 
   return (
     <div style={{ marginBottom: 14 }}>
       {/* Label row */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 6,
-      }}>
-        <span style={{
-          fontSize: 13,
-          color: 'var(--text-primary)',
-          fontWeight: 500,
-        }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <span style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>
           {displayLabel}
         </span>
-        <span style={{
-          fontSize: 14,
-          fontWeight: 600,
-          color: getPercentColor(percentage),
-          fontFeatureSettings: '"tnum"',
-        }}>
-          {percentage}%
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {readings && readings.length >= 3 && (
+            <Sparkline readings={readings} color={barColor} />
+          )}
+          <span style={{
+            fontSize: 14, fontWeight: 600,
+            color: getPercentColor(percentage),
+            fontFeatureSettings: '"tnum"',
+          }}>
+            {percentage}%
+          </span>
+        </div>
       </div>
 
       {/* Progress bar */}
@@ -72,27 +118,27 @@ function UsageBarComponent({
         />
       </div>
 
-      {/* Reset info */}
-      {resetInfo && (
-        <div style={{
-          fontSize: 11,
-          color: 'var(--text-muted)',
-        }}>
-          {resetInfo}
-        </div>
-      )}
+      {/* Reset info + burn rate */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {resetInfo && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{resetInfo}</div>
+        )}
+        {showBurnRate && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+            {formatEta(burnRate!.etaMinutes!)}
+            <span style={{ opacity: 0.6 }}> · +{burnRate!.ratePerHour.toFixed(1)}%/hr</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-export function ClaudeMaxUsage({ usage, onLogin, loading }: Props) {
+export function ClaudeMaxUsage({ usage, onLogin, loading, history, burnRates }: Props) {
   if (!usage?.isAuthenticated) {
     return (
       <div className="section">
-        <div style={{
-          textAlign: 'center',
-          padding: '20px 0',
-        }}>
+        <div style={{ textAlign: 'center', padding: '20px 0' }}>
           <div style={{ fontSize: 24, marginBottom: 10 }}>Claude</div>
           <p style={{ color: 'var(--text-secondary)', marginBottom: 14, fontSize: 13 }}>
             Login to Claude to see your subscription usage
@@ -117,10 +163,7 @@ export function ClaudeMaxUsage({ usage, onLogin, loading }: Props) {
     ? usage.bars
     : [usage.standard, usage.advanced].filter(b => b.percentage > 0 || b.limit > 0);
 
-  const getResetInfo = (bar: UsageBarType): string | undefined => {
-    if (bar.context) return bar.context;
-    return undefined;
-  };
+  const getResetInfo = (bar: UsageBarType): string | undefined => bar.context || undefined;
 
   const getLabel = (bar: UsageBarType, index: number): string => {
     if (bar.label) return bar.label;
@@ -135,14 +178,21 @@ export function ClaudeMaxUsage({ usage, onLogin, loading }: Props) {
           No usage data available
         </div>
       ) : (
-        bars.map((bar, index) => (
-          <UsageBarComponent
-            key={index}
-            bar={bar}
-            label={getLabel(bar, index)}
-            resetInfo={getResetInfo(bar)}
-          />
-        ))
+        bars.map((bar, index) => {
+          const label = getLabel(bar, index);
+          const readings = history?.find(h => h.label === label)?.readings;
+          const burnRate = burnRates?.find(b => b.label === label);
+          return (
+            <UsageBarComponent
+              key={index}
+              bar={bar}
+              label={label}
+              resetInfo={getResetInfo(bar)}
+              readings={readings}
+              burnRate={burnRate}
+            />
+          );
+        })
       )}
     </div>
   );
