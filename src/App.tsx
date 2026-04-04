@@ -19,6 +19,8 @@ function App() {
   const [history, setHistory] = useState<BarHistory[]>([]);
   const [burnRates, setBurnRates] = useState<BurnRateInfo[]>([]);
   const [apiCost, setApiCost] = useState<ApiCostSummary | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [refreshInterval, setRefreshInterval] = useState(60);
 
   const refreshData = useCallback(async () => {
     if (!isElectron) { setLoading(false); return; }
@@ -30,6 +32,7 @@ function App() {
 
   useEffect(() => {
     if (!isElectron) { setLoading(false); return; }
+    window.electronAPI.getSettings().then(s => setRefreshInterval(s.refreshInterval));
     refreshData();
     const unsubscribe = window.electronAPI.onDataRefresh((data: RefreshData) => {
       setClaudeUsage(data.claudeUsage);
@@ -38,6 +41,7 @@ function App() {
       if (data.history) setHistory(data.history);
       if (data.burnRates) setBurnRates(data.burnRates);
       if (data.apiCost !== undefined) setApiCost(data.apiCost ?? null);
+      setFetchError(data.fetchError ?? null);
       setLoading(false);
     });
     return () => unsubscribe();
@@ -125,9 +129,27 @@ function App() {
         </div>
       </div>
 
+      {/* Error banner */}
+      {fetchError && !showSettings && (
+        <div style={{
+          background: '#78350f', borderBottom: '1px solid #92400e',
+          padding: '6px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <span style={{ fontSize: 11, color: '#fde68a' }}>
+            {fetchError} — showing cached data
+          </span>
+          <button className="btn-icon" style={{ fontSize: 11, color: '#fde68a', opacity: 0.8 }} onClick={refreshData}>
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Settings panel (replaces content) */}
       {showSettings ? (
-        <Settings onClose={() => setShowSettings(false)} />
+        <Settings onClose={() => {
+          setShowSettings(false);
+          window.electronAPI.getSettings().then(s => setRefreshInterval(s.refreshInterval));
+        }} />
       ) : (
         <>
           {/* Tabs — only show Cost tab if admin key configured */}
@@ -174,7 +196,7 @@ function App() {
             color: 'var(--text-muted)', borderTop: '1px solid var(--border)',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Auto-refresh 60s</span>
+              <span>Auto-refresh {refreshInterval}s</span>
               <button
                 className="btn-icon"
                 onClick={() => setShowLogs(!showLogs)}

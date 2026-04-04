@@ -50,6 +50,7 @@ export interface AppSettings {
   telegramChatId: string;
   notificationThresholds: number[];
   refreshInterval: number; // seconds
+  adminApiKey: string;
 }
 
 export interface RefreshData {
@@ -59,6 +60,7 @@ export interface RefreshData {
   history?: BarHistory[];
   burnRates?: BurnRateInfo[];
   apiCost?: ApiCostSummary | null;
+  fetchError?: string | null;
 }
 
 // Window type augmentation for Electron API
@@ -72,6 +74,7 @@ declare global {
       onDataRefresh: (callback: (data: RefreshData) => void) => () => void;
       getSettings: () => Promise<AppSettings>;
       setSetting: (key: keyof AppSettings, value: AppSettings[keyof AppSettings]) => Promise<void>;
+      testTelegram: () => Promise<{ ok: boolean; error?: string }>;
     };
   }
 }

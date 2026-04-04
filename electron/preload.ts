@@ -45,6 +45,7 @@ export interface AppSettings {
   telegramChatId: string;
   notificationThresholds: number[];
   refreshInterval: number;
+  adminApiKey: string;
 }
 
 export interface RefreshData {
@@ -54,6 +55,7 @@ export interface RefreshData {
   history?: BarHistory[];
   burnRates?: BurnRateInfo[];
   apiCost?: ApiCostSummary | null;
+  fetchError?: string | null;
 }
 
 export interface ElectronAPI {
@@ -65,6 +67,7 @@ export interface ElectronAPI {
   onDataRefresh: (callback: (data: RefreshData) => void) => () => void;
   getSettings: () => Promise<AppSettings>;
   setSetting: (key: string, value: unknown) => Promise<void>;
+  testTelegram: () => Promise<{ ok: boolean; error?: string }>;
 }
 
 // Auto-resize window to fit content
@@ -102,6 +105,7 @@ const electronAPI: ElectronAPI = {
   },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSetting: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),
+  testTelegram: () => ipcRenderer.invoke('telegram:test'),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);
