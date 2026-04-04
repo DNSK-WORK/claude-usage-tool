@@ -19,6 +19,7 @@ function App() {
   const [history, setHistory] = useState<BarHistory[]>([]);
   const [burnRates, setBurnRates] = useState<BurnRateInfo[]>([]);
   const [apiCost, setApiCost] = useState<ApiCostSummary | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [refreshInterval, setRefreshInterval] = useState(60);
 
   const refreshData = useCallback(async () => {
@@ -31,6 +32,7 @@ function App() {
 
   useEffect(() => {
     if (!isElectron) { setLoading(false); return; }
+    window.electronAPI.getSettings().then(s => setRefreshInterval(s.refreshInterval));
     refreshData();
     window.electronAPI.getSettings().then(s => setRefreshInterval(s.refreshInterval));
     const unsubscribe = window.electronAPI.onDataRefresh((data: RefreshData) => {
@@ -40,6 +42,7 @@ function App() {
       if (data.history) setHistory(data.history);
       if (data.burnRates) setBurnRates(data.burnRates);
       if (data.apiCost !== undefined) setApiCost(data.apiCost ?? null);
+      setFetchError(data.fetchError ?? null);
       setLoading(false);
     });
     return () => unsubscribe();
@@ -122,9 +125,27 @@ function App() {
         </div>
       </div>
 
+      {/* Error banner */}
+      {fetchError && !showSettings && (
+        <div style={{
+          background: '#78350f', borderBottom: '1px solid #92400e',
+          padding: '6px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <span style={{ fontSize: 11, color: '#fde68a' }}>
+            {fetchError} — showing cached data
+          </span>
+          <button className="btn-icon" style={{ fontSize: 11, color: '#fde68a', opacity: 0.8 }} onClick={refreshData}>
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Settings panel (replaces content) */}
       {showSettings ? (
-        <Settings onClose={(savedInterval) => { setShowSettings(false); if (savedInterval !== undefined) setRefreshInterval(savedInterval); }} />
+        <Settings onClose={() => {
+          setShowSettings(false);
+          window.electronAPI.getSettings().then(s => setRefreshInterval(s.refreshInterval));
+        }} />
       ) : (
         <>
           {/* Tabs — only show Cost tab if admin key configured */}

@@ -67,7 +67,7 @@ function getRefreshInterval(): number {
   return ((store.get('refreshInterval') as number) || 60) * 1000;
 }
 
-console.log('Admin key configured:', !!process.env.ANTHROPIC_ADMIN_KEY);
+console.log('Admin key configured:', !!process.env.ANTHROPIC_ADMIN_KEY || !!(store?.get('adminApiKey')));
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -379,8 +379,12 @@ function updateTrayTitle(claudeUsage: { isAuthenticated: boolean; bars?: Array<{
   }
 }
 
+function getAdminKey(): string {
+  return (store.get('adminApiKey') as string) || process.env.ANTHROPIC_ADMIN_KEY || '';
+}
+
 async function fetchApiCost() {
-  const adminKey = process.env.ANTHROPIC_ADMIN_KEY;
+  const adminKey = getAdminKey();
   if (!adminKey?.startsWith('sk-ant-admin')) return null;
 
   try {
@@ -409,24 +413,32 @@ async function fetchApiCost() {
   }
 }
 
+let isRefreshing = false;
+
 async function refreshAllData() {
   if (!mainWindow) return;
+  if (isRefreshing) { addLog('Refresh already in progress, skipping'); return; }
+  isRefreshing = true;
   addLog('Refreshing data...');
   refreshCount++;
 
+  let fetchError: string | null = null;
   try {
     const shouldRefreshCost = refreshCount === 1 || refreshCount % API_COST_REFRESH_EVERY === 0;
 
-    const [claudeUsage, freshApiCost] = await Promise.all([
-      scrapeClaudeUsage().then(result => {
-        if (result?.isAuthenticated) addLog(`Usage: ${result.bars?.length || 0} bars fetched`);
-        else if (result) addLog('Usage: Not authenticated');
-        else addLog('Usage: Skipped (in progress)');
-        return result;
-      }).catch(err => { addLog(`Usage error: ${err.message}`); return null; }),
-      shouldRefreshCost ? fetchApiCost() : Promise.resolve(cachedApiCost),
-    ]);
+    let claudeUsage: Awaited<ReturnType<typeof scrapeClaudeUsage>> = null;
+    try {
+      claudeUsage = await scrapeClaudeUsage();
+      if (claudeUsage?.isAuthenticated) addLog(`Usage: ${claudeUsage.bars?.length || 0} bars fetched`);
+      else if (claudeUsage) addLog('Usage: Not authenticated');
+      else { addLog('Usage: fetch returned null'); fetchError = 'Connection error'; }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addLog(`Usage error: ${msg}`);
+      fetchError = msg.includes('abort') || msg.includes('timeout') ? 'Request timed out' : `Fetch error: ${msg}`;
+    }
 
+    const freshApiCost = shouldRefreshCost ? await fetchApiCost() : cachedApiCost;
     if (shouldRefreshCost) cachedApiCost = freshApiCost;
     const apiCost = freshApiCost ?? cachedApiCost;
 
@@ -457,11 +469,14 @@ async function refreshAllData() {
         history,
         burnRates,
         apiCost,
+        fetchError,
       });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     addLog(`Refresh failed: ${message}`);
+  } finally {
+    isRefreshing = false;
   }
 }
 
@@ -486,12 +501,20 @@ ipcMain.handle('app:get-admin-key-status', () => ({
   configured: !!process.env.ANTHROPIC_ADMIN_KEY?.startsWith('sk-ant-admin'),
 }));
 
-ipcMain.handle('settings:get', () => ({
-  telegramBotToken: getTelegramToken(),
-  telegramChatId: getTelegramChatId(),
-  notificationThresholds: getNotificationThresholds(),
-  refreshInterval: getSetting<number>('refreshInterval', 60),
-}));
+ipcMain.handle('settings:get', () => {
+  const storedKey = (store.get('adminApiKey') as string) || '';
+  const envKey = process.env.ANTHROPIC_ADMIN_KEY || '';
+  const displayKey = storedKey
+    ? '••••' + storedKey.slice(-4)
+    : (envKey ? '(from .env.local)' : '');
+  return {
+    telegramBotToken: getTelegramToken(),
+    telegramChatId: getTelegramChatId(),
+    notificationThresholds: getNotificationThresholds(),
+    refreshInterval: getSetting<number>('refreshInterval', 60),
+    adminApiKey: displayKey,
+  };
+});
 
 ipcMain.handle('settings:set', (_event, key: string, value: unknown) => {
   store.set(key, value);
@@ -500,6 +523,30 @@ ipcMain.handle('settings:set', (_event, key: string, value: unknown) => {
   if (key === 'refreshInterval' && refreshInterval) {
     clearInterval(refreshInterval);
     refreshInterval = setInterval(refreshAllData, getRefreshInterval());
+  }
+});
+
+ipcMain.handle('telegram:test', async () => {
+  const botToken = getTelegramToken();
+  const chatId = getTelegramChatId();
+  if (!botToken || !chatId) {
+    return { ok: false, error: 'Bot token and Chat ID are required' };
+  }
+  try {
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: '✅ Claude Usage Tool — test message', parse_mode: 'HTML' }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      return { ok: false, error: `Telegram error ${response.status}: ${text}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 });
 

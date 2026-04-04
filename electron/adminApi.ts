@@ -105,6 +105,7 @@ async function fetchApi<T>(adminKey: string, endpoint: string, params: Record<st
       'anthropic-version': API_VERSION,
       'content-type': 'application/json',
     },
+    signal: AbortSignal.timeout(10000),
   });
 
   if (!response.ok) {

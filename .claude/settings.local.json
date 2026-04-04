@@ -16,7 +16,14 @@
       "Bash(git commit -m \"$(cat <<''EOF''\nAdd platform billing scraper and improve header display\n\n- Add billing page scraper for platform.claude.com to show API credit balance\n- Add separate platform login flow (platform.claude.com uses different auth than claude.ai)\n- Update header to show plan name and email (e.g., \"Max Plan - user@email.com\")\n- Extract plan and email from Claude usage page\n- Remove unused ModelBreakdown component and API cost report code\n- Simplify types by removing unused API data interfaces\n- Show \"Login to Platform\" button when billing info unavailable\n- Fix platform login window to stay open until login completes\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(find:*)",
       "Bash(tree:*)",
-      "Bash(git -C /Users/kingigilbert/.claude-worktrees/claude-usage-tool/nice-hypatia log --oneline -10)"
+      "Bash(git -C /Users/kingigilbert/.claude-worktrees/claude-usage-tool/nice-hypatia log --oneline -10)",
+      "WebFetch(domain:api.telegram.org)",
+      "Bash(node -e \"const s = require\\(''''electron-store''''\\); console.log\\(typeof s, typeof s.default\\)\")",
+      "Bash(node -e \"const Store = require\\(''electron-store''\\); const s = new Store\\(\\); s.set\\(''test'', 1\\); console.log\\(s.get\\(''test''\\)\\)\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(git commit:*)",
+      "Bash(screencapture -x /tmp/claude-tool-screen.png)",
+      "Bash(gh release:*)"
     ],
     "deny": [],
     "ask": []

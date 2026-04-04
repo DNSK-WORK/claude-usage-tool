@@ -142,7 +142,7 @@ export async function scrapeClaudeUsage(): Promise<ClaudeMaxUsage | null> {
 
   try {
     // Step 1: Get UUID from organisation list
-    const orgsRes = await ses.fetch(`${CLAUDE_BASE_URL}/api/organizations`);
+    const orgsRes = await ses.fetch(`${CLAUDE_BASE_URL}/api/organizations`, { signal: AbortSignal.timeout(10000) });
     if (orgsRes.status === 401 || orgsRes.status === 403) {
       console.log('Not authenticated (status', orgsRes.status, ')');
       return notAuthenticated;
@@ -155,7 +155,7 @@ export async function scrapeClaudeUsage(): Promise<ClaudeMaxUsage | null> {
 
     // Step 2: Fetch usage for each organisation (use first with data)
     for (const org of orgs) {
-      const usageRes = await ses.fetch(`${CLAUDE_BASE_URL}/api/organizations/${org.uuid}/usage`);
+      const usageRes = await ses.fetch(`${CLAUDE_BASE_URL}/api/organizations/${org.uuid}/usage`, { signal: AbortSignal.timeout(10000) });
       if (!usageRes.ok) continue;
 
       const data = await usageRes.json() as UsageApiResponse;
