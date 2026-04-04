@@ -1,6 +1,6 @@
 {
   "name": "claude-usage-tool",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Menu bar app to track Claude Max subscription usage and API costs",
   "main": "dist-electron/main.js",
   "scripts": {
