@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ClaudeMaxUsage as ClaudeMaxUsageType, UsageBar as UsageBarType, BarHistory, BurnRateInfo } from '../types';
 
 interface Props {
@@ -87,11 +88,22 @@ function UsageBarComponent({
   readings?: Array<{ ts: number; pct: number }>;
   burnRate?: BurnRateInfo;
 }) {
+  const [copied, setCopied] = useState(false);
   const displayLabel = bar.label || label;
   const percentage = Math.round(bar.percentage);
   const barColor = getBarColor(percentage);
   const isCritical = percentage >= 90;
   const showBurnRate = burnRate && burnRate.etaMinutes !== null && burnRate.ratePerHour >= 0.1;
+
+  function handleCopy() {
+    const text = resetInfo
+      ? `${displayLabel}: ${percentage}% (${resetInfo})`
+      : `${displayLabel}: ${percentage}%`;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
 
   return (
     <div style={{ marginBottom: 14 }}>
@@ -104,12 +116,18 @@ function UsageBarComponent({
           {readings && readings.length >= 3 && (
             <Sparkline readings={readings} color={barColor} />
           )}
-          <span style={{
-            fontSize: 14, fontWeight: 600,
-            color: getPercentColor(percentage),
-            fontFeatureSettings: '"tnum"',
-          }}>
-            {percentage}%
+          <span
+            onClick={handleCopy}
+            title="Click to copy"
+            style={{
+              fontSize: 14, fontWeight: 600,
+              color: copied ? 'var(--bar-green)' : getPercentColor(percentage),
+              fontFeatureSettings: '"tnum"',
+              cursor: 'pointer',
+              userSelect: 'none',
+            }}
+          >
+            {copied ? 'Copied' : `${percentage}%`}
           </span>
         </div>
       </div>

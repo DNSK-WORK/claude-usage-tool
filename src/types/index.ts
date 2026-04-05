@@ -1,3 +1,5 @@
+// IPC contract types — keep in sync with electron/sharedTypes.ts
+
 export interface UsageBar {
   used: number;
   limit: number;
@@ -41,8 +43,9 @@ export interface BurnRateInfo {
 export interface ApiCostSummary {
   totalCost: number;
   byModel: Record<string, number>;
-  creditBalance: string | null;
+  creditBalance: number | null;
   hasAdminKey: boolean;
+  lastUpdated?: string;
 }
 
 export interface AppSettings {

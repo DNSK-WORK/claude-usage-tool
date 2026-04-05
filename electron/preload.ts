@@ -1,55 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type {
+  ClaudeMaxUsage,
+  RefreshData,
+  AppSettings,
+} from './sharedTypes';
 
-export interface ClaudeMaxUsage {
-  standard: { used: number; limit: number; percentage: number };
-  advanced: { used: number; limit: number; percentage: number };
-  bars?: Array<{ used: number; limit: number; percentage: number; label?: string; context?: string }>;
-  resetDate: string | null;
-  lastUpdated: string;
-  isAuthenticated: boolean;
-  plan?: string;
-  email?: string;
-}
-
-export interface BarReading {
-  ts: number;
-  pct: number;
-}
-
-export interface BarHistory {
-  label: string;
-  readings: BarReading[];
-}
-
-export interface BurnRateInfo {
-  label: string;
-  ratePerHour: number;
-  etaMinutes: number | null;
-}
-
-export interface ApiCostSummary {
-  totalCost: number;
-  byModel: Record<string, number>;
-  creditBalance: string | null;
-  hasAdminKey: boolean;
-}
-
-export interface AppSettings {
-  telegramBotToken: string;
-  telegramChatId: string;
-  notificationThresholds: number[];
-  refreshInterval: number;
-  adminApiKey: string;
-}
-
-export interface RefreshData {
-  claudeUsage: ClaudeMaxUsage | null;
-  timestamp: string;
-  history?: BarHistory[];
-  burnRates?: BurnRateInfo[];
-  apiCost?: ApiCostSummary | null;
-  fetchError?: string | null;
-}
+export type { ClaudeMaxUsage, RefreshData, AppSettings };
 
 export interface ElectronAPI {
   getClaudeMaxUsage: () => Promise<ClaudeMaxUsage | null>;

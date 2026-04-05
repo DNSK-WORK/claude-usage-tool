@@ -67,7 +67,6 @@ function getRefreshInterval(): number {
   return ((store.get('refreshInterval') as number) || 60) * 1000;
 }
 
-console.log('Admin key configured:', !!process.env.ANTHROPIC_ADMIN_KEY || !!(store?.get('adminApiKey')));
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -417,12 +416,13 @@ async function fetchApiCost() {
     return {
       totalCost,
       byModel,
-      creditBalance: creditBalance?.available_credit ?? null,
+      creditBalance: creditBalance?.available_credit ? parseFloat(creditBalance.available_credit) : null,
       hasAdminKey: true,
+      lastUpdated: new Date().toISOString(),
     };
   } catch (err) {
     addLog(`API cost fetch error: ${err instanceof Error ? err.message : String(err)}`);
-    return { totalCost: 0, byModel: {}, creditBalance: null, hasAdminKey: true };
+    return { totalCost: 0, byModel: {}, creditBalance: null, hasAdminKey: true, lastUpdated: new Date().toISOString() };
   }
 }
 
@@ -510,9 +510,6 @@ ipcMain.handle('claude-max:login', async () => openLoginWindow());
 ipcMain.handle('platform:login', async () => openPlatformLoginWindow());
 ipcMain.handle('app:refresh-all', async () => refreshAllData());
 
-ipcMain.handle('app:get-admin-key-status', () => ({
-  configured: !!process.env.ANTHROPIC_ADMIN_KEY?.startsWith('sk-ant-admin'),
-}));
 
 ipcMain.handle('settings:get', () => {
   const storedKey = (store.get('adminApiKey') as string) || '';

@@ -193,11 +193,22 @@ export function openLoginWindow(): Promise<boolean> {
       },
     });
 
-    loginWindow.on('closed', async () => {
-      loginWindow = null;
+    let resolved = false;
+    const finish = async (closedByNav = false) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeoutId);
+      if (!closedByNav) loginWindow = null;
       const auth = await isAuthenticated();
       resolve(auth);
-    });
+    };
+
+    // 3-minute safety timeout — closes window if user abandons it
+    const timeoutId = setTimeout(() => {
+      loginWindow?.close();
+    }, 3 * 60 * 1000);
+
+    loginWindow.on('closed', () => { loginWindow = null; finish(); });
 
     loginWindow.webContents.on('did-navigate', async (_, url) => {
       if (url.includes('claude.ai') && !url.includes('login') && !url.includes('signup')) {

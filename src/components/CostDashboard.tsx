@@ -25,11 +25,9 @@ export function CostDashboard({ apiCost }: Props) {
           <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
             Add an Admin API key to see cost data
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'SF Mono, Menlo, monospace' }}>
-            ANTHROPIC_ADMIN_KEY=sk-ant-admin…
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-            in .env.local
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            Open ⚙ Settings and paste your key from<br />
+            console.anthropic.com/settings/admin-keys
           </div>
         </div>
       </div>
@@ -41,6 +39,10 @@ export function CostDashboard({ apiCost }: Props) {
     .filter(([, cost]) => cost > 0);
 
   const maxCost = entries[0]?.[1] || 1;
+
+  const lastUpdatedStr = apiCost.lastUpdated
+    ? new Date(apiCost.lastUpdated).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })
+    : null;
 
   return (
     <div className="section" style={{ padding: '12px 16px' }}>
@@ -56,11 +58,11 @@ export function CostDashboard({ apiCost }: Props) {
             {formatCost(apiCost.totalCost)}
           </div>
         </div>
-        {apiCost.creditBalance && (
+        {apiCost.creditBalance !== null && (
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>credit balance</div>
             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--bar-green)', fontFeatureSettings: '"tnum"' }}>
-              ${parseFloat(apiCost.creditBalance).toFixed(2)}
+              ${apiCost.creditBalance.toFixed(2)}
             </div>
           </div>
         )}
@@ -92,6 +94,12 @@ export function CostDashboard({ apiCost }: Props) {
             </div>
           </div>
         ))
+      )}
+
+      {lastUpdatedStr && (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, opacity: 0.6 }}>
+          Updated {lastUpdatedStr} · refreshes every 5 cycles
+        </div>
       )}
     </div>
   );
