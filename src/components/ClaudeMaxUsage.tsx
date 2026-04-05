@@ -22,18 +22,33 @@ function getPercentColor(percentage: number): string {
 }
 
 function Sparkline({ readings, color }: { readings: Array<{ ts: number; pct: number }>; color: string }) {
-  if (readings.length < 3) return null;
+  if (readings.length < 2) return null;
 
   const W = 60, H = 18;
   const minPct = Math.min(...readings.map(r => r.pct));
   const maxPct = Math.max(...readings.map(r => r.pct));
-  const range = maxPct - minPct || 1;
+  const range = maxPct - minPct;
+
+  // Flat line: draw a centered horizontal line
+  if (range === 0) {
+    const y = (H / 2).toFixed(1);
+    return (
+      <svg width={W} height={H} style={{ display: 'block', overflow: 'visible' }}>
+        <line x1="0" y1={y} x2={W} y2={y} stroke={color} strokeWidth="1.5" opacity={0.4} />
+        <circle cx={W} cy={y} r="2" fill={color} opacity={0.7} />
+      </svg>
+    );
+  }
 
   const points = readings.map((r, i) => {
-    const x = (i / (readings.length - 1)) * W;
+    const x = readings.length === 1 ? W / 2 : (i / (readings.length - 1)) * W;
     const y = H - ((r.pct - minPct) / range) * (H - 2) - 1;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
+
+  const last = readings[readings.length - 1];
+  const lastX = readings.length === 1 ? W / 2 : W;
+  const lastY = H - ((last.pct - minPct) / range) * (H - 2) - 1;
 
   return (
     <svg width={W} height={H} style={{ display: 'block', overflow: 'visible' }}>
@@ -46,13 +61,7 @@ function Sparkline({ readings, color }: { readings: Array<{ ts: number; pct: num
         strokeLinecap="round"
         opacity={0.7}
       />
-      {/* Last point dot */}
-      {(() => {
-        const last = readings[readings.length - 1];
-        const x = W;
-        const y = H - ((last.pct - minPct) / range) * (H - 2) - 1;
-        return <circle cx={x.toFixed(1)} cy={y.toFixed(1)} r="2" fill={color} opacity={0.9} />;
-      })()}
+      <circle cx={lastX.toFixed(1)} cy={lastY.toFixed(1)} r="2" fill={color} opacity={0.9} />
     </svg>
   );
 }
@@ -82,7 +91,7 @@ function UsageBarComponent({
   const percentage = Math.round(bar.percentage);
   const barColor = getBarColor(percentage);
   const isCritical = percentage >= 90;
-  const showBurnRate = burnRate && burnRate.etaMinutes !== null && burnRate.ratePerHour > 0;
+  const showBurnRate = burnRate && burnRate.etaMinutes !== null && burnRate.ratePerHour >= 0.1;
 
   return (
     <div style={{ marginBottom: 14 }}>
@@ -145,6 +154,23 @@ export function ClaudeMaxUsage({ usage, onLogin, loading, history, burnRates }: 
           </p>
           <button className="btn btn-primary" onClick={onLogin} style={{ fontSize: 13, padding: '8px 16px' }}>
             Login to Claude
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Show re-login prompt if authenticated state is stale (no bars)
+  const hasData = (usage.bars?.length ?? 0) > 0 || usage.standard.percentage > 0;
+  if (!loading && !hasData) {
+    return (
+      <div className="section">
+        <div style={{ textAlign: 'center', padding: '16px 0' }}>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 12, fontSize: 13 }}>
+            No usage data — session may have expired
+          </p>
+          <button className="btn btn-primary" onClick={onLogin} style={{ fontSize: 13, padding: '8px 16px' }}>
+            Re-login to Claude
           </button>
         </div>
       </div>

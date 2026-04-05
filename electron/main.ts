@@ -91,7 +91,13 @@ type HistoryEntry = { ts: number; pct: number };
 function loadHistory(): Map<string, HistoryEntry[]> {
   const saved = store.get('usageHistory') as Record<string, HistoryEntry[]> | undefined;
   if (!saved) return new Map();
-  return new Map(Object.entries(saved));
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000; // 7 days
+  const pruned: Record<string, HistoryEntry[]> = {};
+  for (const [label, entries] of Object.entries(saved)) {
+    const fresh = entries.filter(e => e.ts > cutoff);
+    if (fresh.length > 0) pruned[label] = fresh;
+  }
+  return new Map(Object.entries(pruned));
 }
 
 function saveHistory(map: Map<string, HistoryEntry[]>) {

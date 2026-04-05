@@ -230,10 +230,24 @@ export function openPlatformLoginWindow(): Promise<boolean> {
 
     let hasLoggedIn = false;
     let wasOnLoginPage = false;
+    let resolved = false;
+
+    const finish = (result: boolean) => {
+      if (resolved) return;
+      resolved = true;
+      platformLoginWindow = null;
+      resolve(result);
+    };
+
+    // 5-minute safety timeout
+    const timeout = setTimeout(() => {
+      platformLoginWindow?.close();
+      finish(hasLoggedIn);
+    }, 5 * 60 * 1000);
 
     platformLoginWindow.on('closed', () => {
-      platformLoginWindow = null;
-      resolve(hasLoggedIn);
+      clearTimeout(timeout);
+      finish(hasLoggedIn);
     });
 
     platformLoginWindow.webContents.on('did-finish-load', async () => {
