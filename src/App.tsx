@@ -34,7 +34,6 @@ function App() {
     if (!isElectron) { setLoading(false); return; }
     window.electronAPI.getSettings().then(s => setRefreshInterval(s.refreshInterval));
     refreshData();
-    window.electronAPI.getSettings().then(s => setRefreshInterval(s.refreshInterval));
     const unsubscribe = window.electronAPI.onDataRefresh((data: RefreshData) => {
       setClaudeUsage(data.claudeUsage);
       setLastUpdated(new Date(data.timestamp));

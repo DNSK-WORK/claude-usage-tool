@@ -98,7 +98,13 @@ function saveHistory(map: Map<string, HistoryEntry[]>) {
   store.set('usageHistory', Object.fromEntries(map));
 }
 
-const usageHistory: Map<string, HistoryEntry[]> = loadHistory();
+let usageHistory: Map<string, HistoryEntry[]>;
+try {
+  usageHistory = loadHistory();
+} catch (err) {
+  console.error('Failed to load usage history, starting fresh:', err);
+  usageHistory = new Map();
+}
 
 function appendHistory(label: string, pct: number) {
   if (!usageHistory.has(label)) usageHistory.set(label, []);
@@ -124,8 +130,8 @@ function computeBurnRate(label: string, currentPct: number): { ratePerHour: numb
   const remaining = 100 - currentPct;
   const etaMinutes = remaining / ratePerMin;
 
-  // Hide if > 24 hours
-  if (etaMinutes > 1440) return { ratePerHour, etaMinutes: null };
+  // Hide if non-finite or > 24 hours
+  if (!isFinite(etaMinutes) || etaMinutes > 1440) return { ratePerHour, etaMinutes: null };
 
   return { ratePerHour, etaMinutes };
 }
@@ -141,6 +147,7 @@ async function sendTelegramMessage(message: string): Promise<void> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' }),
+      signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) {
       console.error('Telegram API error:', response.status, await response.text());

@@ -11,12 +11,6 @@ export interface ClaudeMaxUsage {
   email?: string;
 }
 
-export interface BillingInfo {
-  creditBalance: number | null;
-  currency: string;
-  lastUpdated: string;
-}
-
 export interface BarReading {
   ts: number;
   pct: number;
@@ -50,7 +44,6 @@ export interface AppSettings {
 
 export interface RefreshData {
   claudeUsage: ClaudeMaxUsage | null;
-  billingInfo: BillingInfo | null;
   timestamp: string;
   history?: BarHistory[];
   burnRates?: BurnRateInfo[];
@@ -76,7 +69,7 @@ function setupAutoResize() {
     const root = document.getElementById('root');
     if (root) {
       const height = root.scrollHeight;
-      ipcRenderer.send('app:resize', height);
+      try { ipcRenderer.send('app:resize', height); } catch { /* window closing */ }
     }
   });
 
