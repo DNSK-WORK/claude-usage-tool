@@ -70,6 +70,7 @@ function getRefreshInterval(): number {
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let aboutWindow: BrowserWindow | null = null;
 let refreshInterval: NodeJS.Timeout | null = null;
 let refreshCount = 0;
 let cachedApiCost: Awaited<ReturnType<typeof fetchApiCost>> = null;
@@ -258,13 +259,6 @@ function createWindow() {
     mainWindow?.hide();
     mainWindow?.setVibrancy(null as unknown as 'under-window');
   });
-
-  ipcMain.on('app:resize', (_event, height: number) => {
-    if (!mainWindow) return;
-    const clampedHeight = Math.min(Math.max(height + 2, 100), 700);
-    const [width] = mainWindow.getSize();
-    mainWindow.setSize(width, clampedHeight);
-  });
 }
 
 function createTray() {
@@ -296,16 +290,19 @@ function createTray() {
     {
       label: 'About',
       click: () => {
-        const aboutWindow = new BrowserWindow({
+        if (aboutWindow) { aboutWindow.focus(); return; }
+        aboutWindow = new BrowserWindow({
           width: 300, height: 200,
           resizable: false, minimizable: false, maximizable: false,
           title: 'About Claude Usage Tool',
           webPreferences: { nodeIntegration: false, contextIsolation: true },
         });
+        aboutWindow.on('closed', () => { aboutWindow = null; });
         const iconPath = path.join(__dirname, '..', 'assets', 'icon.png');
         const iconBase64 = fs.existsSync(iconPath)
           ? 'data:image/png;base64,' + fs.readFileSync(iconPath).toString('base64')
           : '';
+        const version = app.getVersion();
         aboutWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`
           <!DOCTYPE html><html><head><style>
             body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;background:#1a1a1a;color:#fff;text-align:center;-webkit-user-select:none}
@@ -315,7 +312,7 @@ function createTray() {
           </style></head><body>
             <img src="${iconBase64}" alt="icon"/>
             <h1>Claude Usage Tool</h1>
-            <div class="version">ver 0.11</div>
+            <div class="version">ver ${version}</div>
             <div class="author">by <a href="mailto:kingi@kingigilbert.com">Kingi Gilbert</a></div>
           </body></html>
         `));
@@ -509,6 +506,13 @@ ipcMain.handle('claude-max:is-authenticated', async () => isAuthenticated());
 ipcMain.handle('claude-max:login', async () => openLoginWindow());
 ipcMain.handle('platform:login', async () => openPlatformLoginWindow());
 ipcMain.handle('app:refresh-all', async () => refreshAllData());
+
+ipcMain.on('app:resize', (_event, height: number) => {
+  if (!mainWindow) return;
+  const clampedHeight = Math.min(Math.max(height + 2, 100), 700);
+  const [width] = mainWindow.getSize();
+  mainWindow.setSize(width, clampedHeight);
+});
 
 
 ipcMain.handle('settings:get', () => {

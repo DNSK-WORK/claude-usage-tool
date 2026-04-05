@@ -75,6 +75,7 @@ export function Settings({ onClose }: Props) {
       }
       setSaveError('');
       setSaved(true);
+      await window.electronAPI.refreshAll();
       setTimeout(() => { setSaved(false); onClose(); }, 1500);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Save failed');
