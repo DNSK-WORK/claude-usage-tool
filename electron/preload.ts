@@ -14,6 +14,7 @@ export interface ElectronAPI {
   openPlatformLogin: () => Promise<boolean>;
   refreshAll: () => Promise<void>;
   onDataRefresh: (callback: (data: RefreshData) => void) => () => void;
+  onTelegramError: (callback: (message: string) => void) => () => void;
   getSettings: () => Promise<AppSettings>;
   setSetting: (key: string, value: unknown) => Promise<void>;
   testTelegram: () => Promise<{ ok: boolean; error?: string }>;
@@ -51,6 +52,11 @@ const electronAPI: ElectronAPI = {
     return () => {
       ipcRenderer.removeListener('app:data-updated', listener);
     };
+  },
+  onTelegramError: (callback: (message: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, message: string) => callback(message);
+    ipcRenderer.on('telegram:error', listener);
+    return () => { ipcRenderer.removeListener('telegram:error', listener); };
   },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSetting: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),

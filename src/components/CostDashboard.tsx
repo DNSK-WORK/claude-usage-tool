@@ -5,6 +5,7 @@ interface Props {
 }
 
 function formatCost(amount: number): string {
+  if (!isFinite(amount) || isNaN(amount)) return '$—';
   if (amount === 0) return '$0.00';
   if (amount < 0.01) return '<$0.01';
   return `$${amount.toFixed(2)}`;

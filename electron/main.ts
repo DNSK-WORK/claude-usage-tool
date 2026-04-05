@@ -6,6 +6,7 @@ import Store from 'electron-store';
 import { autoUpdater } from 'electron-updater';
 import { scrapeClaudeUsage, openLoginWindow, openPlatformLoginWindow, isAuthenticated } from './scraper';
 import { getCostReport, getCreditBalance, calculateTotalCost, getCostByModel } from './adminApi';
+import { formatResetTime, pruneOldReadings, computeBurnRateFromReadings, HistoryEntry } from './utils';
 
 // Disable default error dialogs in production
 if (app.isPackaged) {
@@ -86,15 +87,13 @@ const previousPercentages: Record<string, number> = {};
 
 // Usage history: circular buffer of last 100 readings per bar label, persisted across restarts
 const HISTORY_MAX = 100;
-type HistoryEntry = { ts: number; pct: number };
 
 function loadHistory(): Map<string, HistoryEntry[]> {
   const saved = store.get('usageHistory') as Record<string, HistoryEntry[]> | undefined;
   if (!saved) return new Map();
-  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000; // 7 days
   const pruned: Record<string, HistoryEntry[]> = {};
   for (const [label, entries] of Object.entries(saved)) {
-    const fresh = entries.filter(e => e.ts > cutoff);
+    const fresh = pruneOldReadings(entries);
     if (fresh.length > 0) pruned[label] = fresh;
   }
   return new Map(Object.entries(pruned));
@@ -122,24 +121,7 @@ function appendHistory(label: string, pct: number) {
 
 function computeBurnRate(label: string, currentPct: number): { ratePerHour: number; etaMinutes: number | null } {
   const arr = usageHistory.get(label);
-  if (!arr || arr.length < 2) return { ratePerHour: 0, etaMinutes: null };
-
-  const oldest = arr[0];
-  const newest = arr[arr.length - 1];
-  const deltaMs = newest.ts - oldest.ts;
-  const deltaPct = newest.pct - oldest.pct;
-
-  if (deltaMs <= 0 || deltaPct <= 0) return { ratePerHour: 0, etaMinutes: null };
-
-  const ratePerHour = (deltaPct / deltaMs) * 3600000;
-  const ratePerMin = deltaPct / (deltaMs / 60000);
-  const remaining = 100 - currentPct;
-  const etaMinutes = remaining / ratePerMin;
-
-  // Hide if non-finite or > 24 hours
-  if (!isFinite(etaMinutes) || etaMinutes > 1440) return { ratePerHour, etaMinutes: null };
-
-  return { ratePerHour, etaMinutes };
+  return computeBurnRateFromReadings(arr ?? [], currentPct);
 }
 
 async function sendTelegramMessage(message: string): Promise<void> {
@@ -156,10 +138,13 @@ async function sendTelegramMessage(message: string): Promise<void> {
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) {
-      console.error('Telegram API error:', response.status, await response.text());
+      const detail = await response.text();
+      console.error('Telegram API error:', response.status, detail);
+      mainWindow?.webContents.send('telegram:error', `Telegram error ${response.status}: ${detail.slice(0, 80)}`);
     }
   } catch (error) {
     console.error('Failed to send Telegram message:', error);
+    mainWindow?.webContents.send('telegram:error', 'Telegram notification failed — check your bot token and chat ID in Settings');
   }
 }
 
@@ -347,29 +332,6 @@ function showWindow() {
   refreshAllData();
 }
 
-function formatResetTime(context?: string): string {
-  if (!context) return '';
-  const enMatch = context.match(/(\d+)\s*hr?\s*(\d+)?\s*min?/i);
-  if (enMatch) {
-    const hours = enMatch[1];
-    const minutes = enMatch[2];
-    return minutes ? `${hours}hr ${minutes}min` : `${hours}hr`;
-  }
-  const krMatch = context.match(/(\d+)\s*시간\s*(\d+)?\s*분?/);
-  if (krMatch) {
-    const hours = krMatch[1];
-    const minutes = krMatch[2];
-    return minutes ? `${hours}hr ${minutes}min` : `${hours}hr`;
-  }
-  const minOnly = context.match(/(\d+)\s*min/i) || context.match(/(\d+)\s*분/);
-  if (minOnly) return `${minOnly[1]}min`;
-  const dateMatch = context.match(/Resets?\s+(.+)/i);
-  if (dateMatch) {
-    const dateStr = dateMatch[1].trim();
-    return dateStr.length <= 20 ? dateStr : dateStr.substring(0, 20);
-  }
-  return '';
-}
 
 function updateTrayTitle(claudeUsage: { isAuthenticated: boolean; bars?: Array<{ percentage: number; label?: string; context?: string }> } | null) {
   if (!tray) return;
@@ -403,12 +365,12 @@ async function fetchApiCost() {
     const endDateStr = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0] + 'T00:00:00Z';
 
     const [costReport, creditBalance] = await Promise.all([
-      getCostReport(adminKey, { starting_at: startDate, ending_at: endDateStr, group_by: ['workspace_id'], limit: 31 }),
+      getCostReport(adminKey, { starting_at: startDate, ending_at: endDateStr, group_by: ['workspace_id'], limit: 31 }).catch(() => null),
       getCreditBalance(adminKey).catch(() => null),
     ]);
 
-    const totalCost = calculateTotalCost(costReport);
-    const byModel = getCostByModel(costReport);
+    const totalCost = costReport ? calculateTotalCost(costReport) : 0;
+    const byModel = costReport ? getCostByModel(costReport) : {};
 
     return {
       totalCost,

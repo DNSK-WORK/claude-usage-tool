@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ClaudeMaxUsage } from './components/ClaudeMaxUsage';
 import { CostDashboard } from './components/CostDashboard';
 import { Settings } from './components/Settings';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import type { ClaudeMaxUsage as ClaudeMaxUsageType, RefreshData, LogEntry, BarHistory, BurnRateInfo, ApiCostSummary } from './types';
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
@@ -20,6 +21,7 @@ function App() {
   const [burnRates, setBurnRates] = useState<BurnRateInfo[]>([]);
   const [apiCost, setApiCost] = useState<ApiCostSummary | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [telegramError, setTelegramError] = useState<string | null>(null);
   const [refreshInterval, setRefreshInterval] = useState(60);
 
   const refreshData = useCallback(async () => {
@@ -44,7 +46,11 @@ function App() {
       setFetchError(data.fetchError ?? null);
       setLoading(false);
     });
-    return () => unsubscribe();
+    const unsubTelegram = window.electronAPI.onTelegramError((msg: string) => {
+      setTelegramError(msg);
+      setTimeout(() => setTelegramError(null), 8000);
+    });
+    return () => { unsubscribe(); unsubTelegram(); };
   }, [refreshData]);
 
   const handleLogin = async () => {
@@ -139,6 +145,17 @@ function App() {
         </div>
       )}
 
+      {/* Telegram error banner — auto-dismisses after 8s */}
+      {telegramError && !showSettings && (
+        <div style={{
+          background: '#78350f', borderBottom: '1px solid #92400e',
+          padding: '6px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <span style={{ fontSize: 11, color: '#fde68a' }}>📬 {telegramError}</span>
+          <button className="btn-icon" style={{ fontSize: 11, color: '#fde68a', opacity: 0.8 }} onClick={() => setTelegramError(null)}>✕</button>
+        </div>
+      )}
+
       {/* Settings panel (replaces content) */}
       {showSettings ? (
         <Settings onClose={() => {
@@ -225,4 +242,12 @@ function App() {
   );
 }
 
-export default App;
+function AppWithBoundary() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
+
+export default AppWithBoundary;

@@ -75,6 +75,7 @@ declare global {
       openClaudeLogin: () => Promise<boolean>;
       refreshAll: () => Promise<void>;
       onDataRefresh: (callback: (data: RefreshData) => void) => () => void;
+      onTelegramError: (callback: (message: string) => void) => () => void;
       getSettings: () => Promise<AppSettings>;
       setSetting: (key: keyof AppSettings, value: AppSettings[keyof AppSettings]) => Promise<void>;
       testTelegram: () => Promise<{ ok: boolean; error?: string }>;

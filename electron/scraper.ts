@@ -210,7 +210,7 @@ export function openLoginWindow(): Promise<boolean> {
 
     loginWindow.on('closed', () => { loginWindow = null; finish(); });
 
-    loginWindow.webContents.on('did-navigate', async (_, url) => {
+    loginWindow.webContents.on('did-navigate', (_, url) => {
       if (url.includes('claude.ai') && !url.includes('login') && !url.includes('signup')) {
         setTimeout(() => loginWindow?.close(), 1000);
       }

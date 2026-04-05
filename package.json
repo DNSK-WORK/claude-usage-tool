@@ -1,6 +1,6 @@
 {
   "name": "claude-usage-tool",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "description": "Menu bar app to track Claude Max subscription usage and API costs",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -10,7 +10,8 @@
     "electron:build": "npm run build && tsc -p tsconfig.electron.json && electron-builder --mac",
     "release": "npm run build && tsc -p tsconfig.electron.json && electron-builder --mac --publish always",
     "start": "electron .",
-    "lint": "eslint . --ext ts,tsx"
+    "lint": "eslint . --ext ts,tsx",
+    "test": "vitest run"
   },
   "dependencies": {
     "dotenv": "^16.3.1",
@@ -29,6 +30,7 @@
     "sharp": "^0.34.5",
     "typescript": "^5.3.3",
     "vite": "^6.0.0",
+    "vitest": "^4.1.2",
     "wait-on": "^7.2.0"
   },
   "build": {
